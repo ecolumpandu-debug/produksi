@@ -1,0 +1,11 @@
+/* Menu Manajemen Stok: tab Stok Aktual / Riwayat */
+.tab-active { 
+    border-bottom: 3px solid #4f46e5; 
+    color: #4f46e5; 
+    font-weight: bold; 
+}
+
+.tab-inactive { 
+    color: #6b7280; 
+    border-bottom: 3px solid transparent; 
+}

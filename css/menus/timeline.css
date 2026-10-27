@@ -1,0 +1,11 @@
+/* Menu Timeline Produksi */
+.sticky-col-left { position: sticky; left: 0; background-color: white; z-index: 10; }
+.sticky-header-top { position: sticky; top: 0; z-index: 20; }
+.sticky-corner { position: sticky; top: 0; left: 0; z-index: 30; }
+
+.shadow-right { box-shadow: 4px 0 6px -1px rgba(0, 0, 0, 0.1); }
+.shadow-bottom { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+
+.timeline-table { border-collapse: separate; border-spacing: 0; }
+.timeline-table th, .timeline-table td { border-right: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
+.timeline-table th:last-child, .timeline-table td:last-child { border-right: none; }
