@@ -36,6 +36,41 @@ async function bukaWorkspaceRAP(jenisMenu, pId) {
     } else alert("Gagal buka Workspace!");
 }
 
+// ---- Bantuan supplier & approval (dipakai RAP Awal dan RAP Belanja) ----
+const SUPPLIER_KOSONG_RAP = 'Belum ada supplier';
+
+function escRap(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Supplier diambil dari Master_Material.Supplier (dicocokkan lewat nama item, tanpa beda huruf besar/kecil).
+function petaSupplierRap() {
+    const peta = {};
+    (masterMaterial || []).forEach(m => {
+        const k = String(m.Nama_Item || '').trim().toLowerCase();
+        const s = String(m.Supplier || '').trim();
+        if (k && s && !peta[k]) peta[k] = s;
+    });
+    return peta;
+}
+function supplierItemRap(peta, nama) {
+    return peta[String(nama || '').trim().toLowerCase()] || SUPPLIER_KOSONG_RAP;
+}
+// Urutan kelompok: nama supplier A-Z, "Belum ada supplier" paling bawah.
+function bandingSupplierRap(a, b) {
+    if (a === b) return 0;
+    if (a === SUPPLIER_KOSONG_RAP) return 1;
+    if (b === SUPPLIER_KOSONG_RAP) return -1;
+    return a.localeCompare(b, 'id');
+}
+
+// Kotak persetujuan: jabatan sebagai judul, ruang tanda tangan, lalu garis nama dan jabatan (diisi saat dicetak).
+function renderApprovalRap(daftarJabatan) {
+    return `<div class="mt-10 grid grid-cols-2 gap-8 text-sm" style="break-inside:avoid;page-break-inside:avoid">` + daftarJabatan.map(j =>
+        `<div class="text-center"><p class="font-semibold mb-20">${escRap(j)}</p><div class="border-t border-gray-800 pt-2 text-left"><p>Nama : ..............................</p><p>Jabatan : ${escRap(j)}</p></div></div>`
+    ).join('') + `</div>`;
+}
+
 function renderHeaderWS(title, kembaliKe) {
     const p = activeWorkspaceData.projectInfo;
     return `<div class="flex justify-between items-center mb-4 no-print"><button onclick="renderMenuRAP('${kembaliKe}')" class="bg-gray-500 text-white px-4 py-2 rounded"><i class="fas fa-arrow-left mr-2"></i>Kembali</button><button onclick="window.print()" class="bg-green-600 text-white px-4 py-2 rounded"><i class="fas fa-print mr-2"></i>Cetak</button></div><div class="print-area bg-white p-8 rounded-lg shadow-lg"><div class="border-b-2 border-gray-800 pb-4 mb-6"><h2 class="text-2xl font-bold uppercase text-center mb-6">${title}</h2><div class="grid grid-cols-2 text-sm text-gray-700"><div><p class="text-xl font-bold text-indigo-900 mb-1"><i class="fas fa-user-tag text-indigo-400 mr-2"></i>${p.Nama_PIC_Klien}</p><p>Project: ${p.Nama_Project}</p></div><div class="text-right"><p><strong>ID:</strong> ${p.Project_ID}</p><p><strong>Alamat:</strong> ${p.Alamat_Project}</p></div></div></div>`;
