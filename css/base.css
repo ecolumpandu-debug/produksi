@@ -47,3 +47,22 @@ body, html {
 ::-webkit-scrollbar-track { background: #f1f1f1; }
 ::-webkit-scrollbar-thumb { background: #888; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+
+/* ======================================================
+   SIDEBAR: bisa disembunyikan / ditampilkan (tombol di header)
+   Komputer: kelas "sidebar-tutup" pada #app-section menyembunyikannya (diingat di browser).
+   HP/tablet (< 768px): tersembunyi, kelas "sidebar-buka" memunculkannya menimpa konten.
+   ====================================================== */
+#sidebar { flex: none; transition: margin-left .2s ease; }
+#sidebar-overlay, #btn-sidebar-tutup { display: none; }
+@media (min-width: 768px) {
+    #app-section.sidebar-tutup #sidebar { margin-left: -16rem; }
+}
+@media (max-width: 767px) {
+    #sidebar { position: fixed; top: 0; bottom: 0; left: 0; z-index: 40; margin-left: -16rem; }
+    #app-section.sidebar-buka #sidebar { margin-left: 0; }
+    #btn-sidebar-tutup { display: block; margin-left: auto; padding: .25rem .5rem; }
+    #app-section.sidebar-buka #sidebar-overlay { display: block; position: fixed; inset: 0; z-index: 30; background: rgba(0, 0, 0, .5); }
+}
+@media (prefers-reduced-motion: reduce) { #sidebar { transition: none; } }
