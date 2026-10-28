@@ -6,7 +6,7 @@
 // =========================================================================
 // state milik menu ini
 let gudangStock = [], gudangLogs = [];
-let currentPageStok = 1, stokCari = '';
+let currentPageStok = 1, stokCari = '', stokKoreksi = null;
 
 const ALOKASI_STOK = {
     Masuk:  [['Pembelian Umum', 'Stok Umum'], ['Pembelian Project', 'Untuk Project']],
@@ -141,23 +141,91 @@ async function simpanTransaksiStok() {
 }
 
 // ------------------------- DATA STOK (stok aktual + riwayat) -------------------------
-async function renderStokData() {
+const rpStok = n => 'Rp ' + Math.round(n || 0).toLocaleString('id-ID');
+
+// Nilai stok per material dengan harga rata-rata bergerak, dihitung dari riwayat (urut lama ke baru):
+// masuk menambah nilai sebesar qty x harga; keluar mengurangi nilai sebesar qty x harga rata-rata saat itu.
+function hitungNilaiStok() {
+    const peta = {};
+    gudangLogs.slice().reverse().forEach(l => {
+        const n = l.Nama_Material || l.Nama_Item; if (!n) return;
+        const o = peta[n] || (peta[n] = { stok: 0, nilai: 0, hargaTerakhir: 0 });
+        const qIn = parseFloat(l.Qty_Masuk) || 0, qOut = parseFloat(l.Qty_Keluar) || 0, h = parseFloat(l.Harga_Satuan) || 0;
+        if (qIn > 0) { o.stok += qIn; o.nilai += qIn * h; o.hargaTerakhir = h; }
+        if (qOut > 0) { const avg = o.stok > 0 ? o.nilai / o.stok : 0; o.nilai -= qOut * avg; o.stok -= qOut; }
+    });
+    Object.keys(peta).forEach(n => { const o = peta[n]; o.harga = o.stok > 0 ? o.nilai / o.stok : o.hargaTerakhir; if (o.stok <= 0) o.nilai = 0; });
+    return peta;
+}
+
+async function renderStokData(notice) {
     if (!(await muatDataStok())) return;
     currentPageStok = 1; stokCari = '';
     document.getElementById('header-title').innerText = 'Manajemen Stok';
-    document.getElementById('main-content').innerHTML = `<div class="bg-white rounded-lg shadow mb-6 flex flex-col"><div class="p-4 border-b flex flex-wrap justify-between items-center gap-3"><h2 class="text-xl font-bold text-gray-800"><i class="fas fa-warehouse text-indigo-600 mr-2"></i>Data Stok</h2><div class="relative"><i class="fas fa-search absolute left-3 top-2.5 text-gray-400"></i><input type="text" id="cari-stok" onkeyup="cariStok()" placeholder="Cari material..." class="pl-10 border p-2 rounded w-64 text-sm focus:outline-indigo-500"></div></div><div class="flex border-b"><button onclick="switchTabStok('stok')" id="t-stok" class="w-1/2 py-3 tab-active transition">Stok Aktual</button><button onclick="switchTabStok('log')" id="t-log" class="w-1/2 py-3 tab-inactive transition hover:bg-gray-50">Riwayat Barang (Masuk/Keluar)</button></div><div id="area-stok" class="p-4"></div><div id="area-log" class="p-4 hidden"></div></div>`;
+    const total = Object.values(hitungNilaiStok()).reduce((t, o) => t + o.nilai, 0);
+    document.getElementById('main-content').innerHTML = `${notice ? `<div class="bg-green-50 border border-green-300 text-green-800 text-sm p-3 rounded mb-4"><i class="fas fa-check-circle mr-2"></i>${escStok(notice)}</div>` : ''}<div id="panel-koreksi-stok" class="hidden"></div><div class="bg-white rounded-lg shadow mb-6 flex flex-col"><div class="p-4 border-b flex flex-wrap justify-between items-center gap-3"><h2 class="text-xl font-bold text-gray-800"><i class="fas fa-warehouse text-indigo-600 mr-2"></i>Data Stok</h2><div class="flex flex-wrap items-center gap-3"><div class="relative"><i class="fas fa-search absolute left-3 top-2.5 text-gray-400"></i><input type="text" id="cari-stok" onkeyup="cariStok()" placeholder="Cari material..." class="pl-10 border p-2 rounded w-64 text-sm focus:outline-indigo-500"></div><div class="bg-indigo-50 border border-indigo-200 rounded px-4 py-1.5 text-right"><div class="text-xs text-indigo-600 font-semibold uppercase">Total Aset Stok</div><div id="total-aset-stok" class="text-lg font-bold text-indigo-900">${rpStok(total)}</div></div></div></div><div class="flex border-b"><button onclick="switchTabStok('stok')" id="t-stok" class="w-1/2 py-3 tab-active transition">Stok Aktual</button><button onclick="switchTabStok('log')" id="t-log" class="w-1/2 py-3 tab-inactive transition hover:bg-gray-50">Riwayat Barang (Masuk/Keluar)</button></div><div id="area-stok" class="p-4"></div><div id="area-log" class="p-4 hidden"></div></div>`;
     renderTabelStokAktual(); renderTabelStokLog();
 }
 
 function cariStok() { stokCari = document.getElementById('cari-stok').value.trim().toLowerCase(); currentPageStok = 1; renderTabelStokAktual(); renderTabelStokLog(); }
 
 function renderTabelStokAktual() {
-    const data = gudangStock.filter(s => !stokCari || String(s.Nama_Item || '').toLowerCase().includes(stokCari));
+    const nilai = hitungNilaiStok();
+    const data = gudangStock.map((s, idx) => ({ s, idx })).filter(x => !stokCari || String(x.s.Nama_Item || '').toLowerCase().includes(stokCari));
     const tot = Math.ceil(data.length / 10) || 1; const slice = data.slice((currentPageStok - 1) * 10, currentPageStok * 10);
-    let h = `<div class="overflow-x-auto"><table class="min-w-full text-left text-sm mb-4"><thead><tr class="bg-gray-800 text-white"><th class="p-3">Nama Material</th><th class="p-3 text-center">Total Stok Fisik</th></tr></thead><tbody>`;
-    if (slice.length === 0) h += `<tr><td colspan="2" class="p-4 text-center italic text-gray-500">${stokCari ? 'Tidak ada material yang cocok.' : 'Gudang kosong.'}</td></tr>`;
-    slice.forEach(s => { h += `<tr class="border-b hover:bg-gray-50"><td class="p-3 font-semibold text-gray-700">${escStok(s.Nama_Item)} <span class="text-xs text-gray-400">(${escStok(s.Satuan || '-')})</span></td><td class="p-3 text-center text-lg font-bold ${s.Total_Stok<=0?'text-red-500 bg-red-50':'text-green-600 bg-green-50'}">${bulatStok(parseFloat(s.Total_Stok) || 0)}</td></tr>`; });
+    let h = `<div class="overflow-x-auto"><table class="min-w-full text-left text-sm mb-4"><thead><tr class="bg-gray-800 text-white"><th class="p-3">Nama Material</th><th class="p-3 text-center">Total Stok Fisik</th><th class="p-3 text-right">Harga / Satuan</th><th class="p-3 text-right">Nilai Stok</th><th class="p-3 text-center no-print">Aksi</th></tr></thead><tbody>`;
+    if (slice.length === 0) h += `<tr><td colspan="5" class="p-4 text-center italic text-gray-500">${stokCari ? 'Tidak ada material yang cocok.' : 'Gudang kosong.'}</td></tr>`;
+    slice.forEach(({ s, idx }) => { const v = nilai[s.Nama_Item] || { harga: 0, nilai: 0 }; h += `<tr class="border-b hover:bg-gray-50"><td class="p-3 font-semibold text-gray-700">${escStok(s.Nama_Item)} <span class="text-xs text-gray-400">(${escStok(s.Satuan || '-')})</span></td><td class="p-3 text-center text-lg font-bold ${s.Total_Stok<=0?'text-red-500 bg-red-50':'text-green-600 bg-green-50'}">${bulatStok(parseFloat(s.Total_Stok) || 0)}</td><td class="p-3 text-right">${rpStok(v.harga)}</td><td class="p-3 text-right font-bold">${rpStok(v.nilai)}</td><td class="p-3 text-center no-print whitespace-nowrap"><button onclick="editStok(${idx})" title="Koreksi stok dan harga" class="text-blue-500 mx-1"><i class="fas fa-edit"></i></button><button onclick="hapusStok(${idx})" title="Hapus item stok" class="text-red-500 mx-1"><i class="fas fa-trash"></i></button></td></tr>`; });
     document.getElementById('area-stok').innerHTML = h + `</tbody></table></div><div class="flex justify-between items-center text-sm text-gray-600 mt-2"><span>Hal ${currentPageStok} dari ${tot}</span><div class="flex gap-2"><button onclick="if(currentPageStok>1){currentPageStok--;renderTabelStokAktual();}" class="px-3 py-1 border rounded bg-white hover:bg-gray-100">Prev</button><button onclick="if(currentPageStok<${tot}){currentPageStok++;renderTabelStokAktual();}" class="px-3 py-1 border rounded bg-white hover:bg-gray-100">Next</button></div></div>`;
+}
+
+// Edit = koreksi stok dan harga. Riwayat lama tidak diubah; selisihnya dicatat sebagai transaksi "Penyesuaian".
+function editStok(idx) {
+    const s = gudangStock[idx], v = hitungNilaiStok()[s.Nama_Item] || { harga: 0 };
+    stokKoreksi = idx;
+    const p = document.getElementById('panel-koreksi-stok');
+    p.className = 'bg-orange-50 border border-orange-300 rounded-lg p-4 mb-4 no-print';
+    p.innerHTML = `<h4 class="font-bold text-orange-700 mb-3"><i class="fas fa-edit mr-2"></i>Koreksi Stok: ${escStok(s.Nama_Item)} <span class="text-xs font-normal text-gray-500">(${escStok(s.Satuan || '-')})</span></h4><div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end"><div><label class="block text-xs font-semibold mb-1">Stok sebenarnya</label><input type="number" id="k-stok" value="${bulatStok(parseFloat(s.Total_Stok) || 0)}" class="w-full border p-2 rounded text-sm"></div><div><label class="block text-xs font-semibold mb-1">Harga / satuan</label><input type="number" id="k-harga" value="${Math.round(v.harga)}" class="w-full border p-2 rounded text-sm"></div><div><label class="block text-xs font-semibold mb-1">Alasan koreksi</label><input type="text" id="k-ref" value="Koreksi stok" class="w-full border p-2 rounded text-sm"></div><div class="flex gap-2"><button onclick="batalKoreksiStok()" class="bg-gray-400 text-white px-4 py-2 rounded text-sm">Batal</button><button onclick="simpanKoreksiStok()" class="bg-orange-500 hover:bg-orange-600 text-white font-bold px-4 py-2 rounded text-sm">Simpan</button></div></div><p class="text-xs text-gray-500 mt-2">Selisih stok/harga dicatat otomatis di Riwayat sebagai "Penyesuaian".</p>`;
+    p.scrollIntoView && p.scrollIntoView({ block: 'nearest' });
+}
+function batalKoreksiStok() { stokKoreksi = null; const p = document.getElementById('panel-koreksi-stok'); p.className = 'hidden'; p.innerHTML = ''; }
+
+async function simpanKoreksiStok() {
+    const s = gudangStock[stokKoreksi]; if (!s) return;
+    const nama = s.Nama_Item, sat = s.Satuan || '';
+    const S = parseFloat(document.getElementById('k-stok').value), P = parseFloat(document.getElementById('k-harga').value) || 0, ref = document.getElementById('k-ref').value || 'Koreksi stok';
+    if (isNaN(S) || S < 0) return alert("Stok sebenarnya harus diisi (0 atau lebih)!");
+    if (S > 0 && P <= 0) return alert("Harga / satuan wajib diisi bila stok lebih dari 0!");
+    const S0 = bulatStok(parseFloat(s.Total_Stok) || 0), A = (hitungNilaiStok()[nama] || { harga: 0 }).harga;
+    const tgl = tglLokalStok(), baris = [];
+    const tambah = (jenis, qty, harga) => { qty = bulatStok(qty); harga = bulatStok(harga); if (qty > 0) baris.push(["STK-" + (Date.now() + baris.length), tgl, nama, jenis, jenis === 'Masuk' ? 'Penyesuaian (Masuk)' : 'Penyesuaian (Keluar)', "", jenis === 'Masuk' ? qty : 0, jenis === 'Keluar' ? qty : 0, sat, harga, qty * harga, ref]); };
+    if (S0 > 0 && Math.abs(P - A) < 1) {
+        if (S > S0) tambah('Masuk', S - S0, A); else if (S < S0) tambah('Keluar', S0 - S, A);
+    } else {
+        if (S0 > 0) tambah('Keluar', S0, A);
+        tambah('Masuk', S - (S0 > 0 ? 0 : S0), P);
+    }
+    if (baris.length === 0) return alert("Tidak ada perubahan stok atau harga.");
+    showLoading("Menyimpan Koreksi...");
+    for (const r of baris) {
+        const res = await apiSaveMaster('Data_Kartu_Stok', r);
+        if (!res.success) { hideLoading(); alert(res.message); return renderStokData(); }
+    }
+    stokKoreksi = null; renderStokData(`Koreksi ${nama} tersimpan (${baris.length} transaksi penyesuaian).`);
+}
+
+// Hapus item stok = hapus seluruh baris transaksi item itu di Data_Kartu_Stok (dari bawah ke atas agar nomor baris tetap benar).
+async function hapusStok(idx) {
+    const s = gudangStock[idx]; if (!s) return;
+    const nama = s.Nama_Item, rows = gudangLogs.filter(l => (l.Nama_Material || l.Nama_Item) === nama);
+    const pakai = rows.filter(l => parseFloat(l.Qty_Keluar) > 0 && l.Project_ID).length;
+    if (!confirm(`Hapus item "${nama}" dari stok?\n\n${rows.length} baris riwayat item ini ikut terhapus permanen.${pakai ? `\n${pakai} transaksi pemakaian project ikut terhapus dan akan mengubah biaya material project tersebut.` : ''}\n\nTidak bisa dibatalkan.`)) return;
+    showLoading("Menghapus item stok...");
+    for (const r of rows.slice().sort((a, b) => b.rowIndex - a.rowIndex)) {
+        const res = await apiDeleteMaster('Data_Kartu_Stok', r.rowIndex);
+        if (!res.success) { hideLoading(); alert(res.message); return renderStokData(); }
+    }
+    renderStokData(`Item ${nama} dihapus dari stok.`);
 }
 
 function renderTabelStokLog() {
