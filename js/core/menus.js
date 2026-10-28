@@ -8,7 +8,9 @@
 // =========================================================================
 const MENUS = {
     Dashboard:          { files: ['dashboard'], open: () => renderVisualDashboard() },
-    Stok:               { files: ['stok'], open: () => renderMenuStok() },
+    Stok_Masuk:         { files: ['stok'], open: () => renderStokMasuk() },
+    Stok_Keluar:        { files: ['stok'], open: () => renderStokKeluar() },
+    Stok_Data:          { files: ['stok'], open: () => renderStokData() },
     Project:            { files: ['project'], open: () => loadProjectData() },
     Timeline:           { files: ['timeline'], open: () => renderMenuTimeline() },
     RAP_Awal:           { files: ['rap-common', 'rap-awal'], open: () => renderMenuRAP('RAP_Awal') },
