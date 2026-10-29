@@ -190,6 +190,6 @@ function tampilCetakSj(r, notice) {
         </div>
         <table class="w-full text-sm border-collapse mb-4"><thead><tr class="bg-gray-100"><th class="p-2 border w-12">No</th><th class="p-2 border text-left">Nama Barang</th><th class="p-2 border w-24">Qty</th><th class="p-2 border w-28">Satuan</th><th class="p-2 border text-left">Keterangan</th></tr></thead><tbody>${baris}</tbody></table>
         ${r.Catatan ? `<p class="text-sm mb-4"><strong>Catatan:</strong> ${escSj(r.Catatan)}</p>` : ''}
-        <div class="mt-10 grid grid-cols-3 gap-8 text-sm" style="break-inside:avoid;page-break-inside:avoid">${ttd('Penerima')}${ttd('Driver / PIC')}${ttd('Kepala Workshop')}</div>
+        <div class="mt-10 grid grid-cols-3 gap-8 text-sm" style="break-inside:avoid;page-break-inside:avoid">${ttd('Penerima')}${ttd('Driver / PIC')}${ttd('Kepala Produksi')}</div>
     </div>`;
 }
