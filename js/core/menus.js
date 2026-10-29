@@ -16,6 +16,7 @@ const MENUS = {
     RAP_Awal:           { files: ['rap-common', 'rap-awal'], open: () => renderMenuRAP('RAP_Awal') },
     RAP_Belanja:        { files: ['rap-common', 'rap-belanja'], open: () => renderMenuRAP('RAP_Belanja') },
     RAP_Final:          { files: ['rap-common', 'rap-final'], open: () => renderMenuRAP('RAP_Final') },
+    Surat_Jalan:        { files: ['surat-jalan'], open: () => renderSuratJalan() },
     Master_Material:    { files: ['master'], open: () => renderMenuMaster('Master_Material') },
     Master_Jasa:        { files: ['master'], open: () => renderMenuMaster('Master_Jasa') },
     Master_Operasional: { files: ['master'], open: () => renderMenuMaster('Master_Operasional') },
