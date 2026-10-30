@@ -26,12 +26,12 @@ async function renderMenuTimeline() {
         rawTimelineData = timeRes.data;
         
         let html = `
-        <div class="bg-white border-b shadow-sm p-4 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 mb-4 rounded no-print">
-            <div class="w-full xl:w-1/2">
+        <div class="bg-white border-b shadow-sm p-4 flex flex-col 2xl:flex-row justify-between items-start 2xl:items-center gap-4 mb-4 rounded no-print">
+            <div class="w-full 2xl:w-1/2">
                 <h1 class="text-lg font-bold text-teal-700 mb-2 uppercase">A. Keterangan Kode Warna</h1>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-2" id="legend-container"></div>
             </div>
-            <div class="w-full xl:w-1/2 flex flex-col sm:flex-row justify-start xl:justify-end items-start sm:items-center gap-3">
+            <div class="w-full 2xl:w-1/2 flex flex-col sm:flex-row justify-start 2xl:justify-end items-start sm:items-center gap-3">
                 <div class="flex flex-col sm:flex-row gap-2 items-start sm:items-center bg-gray-50 p-2 rounded border w-full sm:w-auto">
                     <span class="text-sm font-bold text-gray-600">Filter:</span>
                     <div class="flex gap-2 w-full sm:w-auto">
