@@ -78,7 +78,7 @@ async function tampilFormStok(jenis, notice) {
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <div><label class="block text-sm text-gray-600 mb-1">Qty</label><input type="number" id="s-qty" class="w-full border p-2 rounded focus:outline-indigo-500" placeholder="0"></div>
             <div><label class="block text-sm text-gray-600 mb-1">Satuan</label><input type="text" id="s-satuan" class="w-full border p-2 rounded bg-gray-100" readonly></div>
-            <div><label class="block text-sm text-gray-600 mb-1">Harga/Satuan</label><input type="number" id="s-harga" class="w-full border p-2 rounded ${masuk ? 'bg-white focus:outline-indigo-500' : 'bg-gray-200 text-gray-700 cursor-not-allowed'}" ${masuk ? '' : 'readonly'} placeholder="Rp 0"></div>
+            <div><label class="block text-sm text-gray-600 mb-1">Harga/Satuan</label><input type="number" id="s-harga" class="w-full border p-2 rounded ${masuk ? 'bg-white focus:outline-indigo-500' : 'bg-gray-200 text-gray-700 cursor-not-allowed'}" ${masuk ? '' : 'readonly'} placeholder="Rp 0" ${masuk ? 'oninput="perbaruiInfoHargaStok()"' : ''}><div id="s-info-harga" class="text-xs text-amber-700 mt-1 min-h-[1rem]"></div></div>
         </div>
         <div class="mb-6"><label class="block text-sm text-gray-600 mb-1">Referensi / Nota</label><input type="text" id="s-referensi" class="w-full border p-2 rounded focus:outline-indigo-500" placeholder="Contoh: Nota Pembelian / Nama Toko"></div>
         <div class="flex justify-end gap-2 border-t pt-4">
@@ -131,13 +131,12 @@ function liveSearchMaterialStok() {
             li.onclick = () => {
                 document.getElementById('s-nama').value = i.Nama_Item; document.getElementById('s-satuan').value = sat;
                 perbaruiInfoStok();
-                if(document.getElementById('s-jenis').value === 'Masuk') { document.getElementById('s-harga').value = ""; document.getElementById('s-harga').focus(); }
-                else {
-                    let lastP = 0; let lLog = gudangLogs.find(l => (l.Nama_Material||l.Nama_Item) === i.Nama_Item && parseFloat(l.Qty_Masuk) > 0);
-                    if(lLog && lLog.Harga_Satuan) lastP = parseInt(lLog.Harga_Satuan.toString().replace(/[^0-9-]/g, "")) || 0;
-                    else lastP = parseInt((i.Harga_Estimasi||0).toString().replace(/[^0-9-]/g, "")) || 0;
-                    document.getElementById('s-harga').value = lastP; document.getElementById('s-qty').focus();
-                } ul.classList.add('hidden');
+                // Harga selalu dari Master Material (harga terbaru). Barang Masuk boleh diedit sesuai nota; Barang Keluar terkunci.
+                const hm = hargaMasterStok(i.Nama_Item);
+                document.getElementById('s-harga').value = hm > 0 ? hm : "";
+                perbaruiInfoHargaStok();
+                document.getElementById(hm > 0 || document.getElementById('s-jenis').value !== 'Masuk' ? 's-qty' : 's-harga').focus();
+                ul.classList.add('hidden');
             }; ul.appendChild(li);
         });
     }
@@ -154,6 +153,17 @@ function liveSearchProjectStok() {
         });
     }
 }
+// Harga satuan di Master Material (angka). 0 bila material tidak ada di master atau harganya kosong.
+function masterItemStok(nama) { return masterMaterial.find(i => i.Nama_Item === nama); }
+function hargaMasterStok(nama) { const m = masterItemStok(nama); const n = m ? Number(String(m.Harga_Estimasi == null ? '' : m.Harga_Estimasi).replace(/[^0-9.\-]/g, '')) : 0; return isNaN(n) ? 0 : n; }
+// Keterangan di bawah kolom harga (Barang Masuk): harga master, dan peringatan bila harga nota diubah.
+function perbaruiInfoHargaStok() {
+    const el = document.getElementById('s-info-harga'); if (!el) return;
+    const nama = document.getElementById('s-nama').value, hm = hargaMasterStok(nama), h = parseFloat(document.getElementById('s-harga').value) || 0;
+    if (!nama) { el.textContent = ''; return; }
+    if (document.getElementById('s-jenis').value !== 'Masuk') { el.textContent = hm > 0 ? 'Harga dari Master Material.' : 'Harga di Master Material masih kosong. Isi dulu di menu Material.'; return; }
+    el.textContent = h > 0 && h !== hm ? `Harga beda dari Master (Rp ${hm.toLocaleString('id-ID')}). Saat disimpan, Master Material ikut diperbarui.` : (hm > 0 ? 'Harga dari Master Material. Ubah bila nota berbeda.' : 'Material belum punya harga di Master. Harga ini akan menjadi harga Master.');
+}
 async function simpanTransaksiStok() {
     const isP = !document.getElementById('wrap-stok-project').classList.contains('hidden'); const pId = document.getElementById('s-project-id').value;
     if(isP && (!pId || document.getElementById('s-project-search').value === "")) return alert("Pilih Klien valid!");
@@ -167,7 +177,17 @@ async function simpanTransaksiStok() {
 
     showLoading("Menyimpan Stok...");
     const res = await apiSaveMaster('Data_Kartu_Stok', ["STK-"+new Date().getTime(), tgl, nama, j, alok, isP?pId:"", j==="Masuk"?qty:0, j==="Keluar"?qty:0, sat, hrg, qty*hrg, ref]);
-    if(res.success) { const info = `Barang ${j === 'Masuk' ? 'masuk' : 'keluar'} tersimpan: ${nama}, ${qty} ${sat}.`; if(j === 'Masuk') renderStokMasuk(info); else renderStokKeluar(info); }
+    if(res.success) {
+        let info = `Barang ${j === 'Masuk' ? 'masuk' : 'keluar'} tersimpan: ${nama}, ${qty} ${sat}.`;
+        // Barang Masuk dengan harga nota berbeda: Master Material ikut diperbarui, supaya Master selalu harga terbaru.
+        const m = masterItemStok(nama);
+        if (j === 'Masuk' && m && hrg !== hargaMasterStok(nama)) {
+            const up = await apiUpdateMaster('Master_Material', m.rowIndex, [m.Material_ID, m.Nama_Item, m.Satuan_Standar, hrg, m.Supplier]);
+            if (up.success) { m.Harga_Estimasi = String(hrg); info += ` Harga di Master Material diperbarui menjadi Rp ${hrg.toLocaleString('id-ID')}.`; }
+            else info += ` Namun harga di Master Material gagal diperbarui (${up.message}). Ubah manual di menu Material.`;
+        }
+        if(j === 'Masuk') renderStokMasuk(info); else renderStokKeluar(info);
+    }
     else { hideLoading(); alert(res.message); }
 }
 
