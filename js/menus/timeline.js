@@ -60,17 +60,35 @@ async function renderMenuTimeline() {
 
         const today = new Date();
         const start = new Date(today); start.setDate(today.getDate() - 7);
-        const end = new Date(today); end.setDate(today.getDate() + 30);
+        // Rentang awal: sampai 60 hari ke depan, atau 14 hari setelah jadwal terjauh bila lebih jauh.
+        const end = new Date(today); end.setDate(today.getDate() + 60);
+        rawTimelineData.forEach(t => { const e = new Date(t.Tanggal_Selesai); if (!isNaN(e)) { e.setDate(e.getDate() + 14); if (e > end) end.setTime(e.getTime()); } });
         document.getElementById('filter-start').value = start.toISOString().split('T')[0];
         document.getElementById('filter-end').value = end.toISOString().split('T')[0];
 
         renderTableTimeline();
+        pasangScrollTimeline();
     } else {
         alert("Gagal memuat data. Pastikan Sheet 'Data_Timeline' sudah dibuat di Google Sheets Anda.");
     }
 }
 
 function terapkanFilterTimeline() { renderTableTimeline(); }
+
+// Geser ke kanan sampai ujung: rentang diperpanjang 30 hari lagi, posisi geser tetap, sehingga bulan berikutnya bisa dilihat terus.
+let _tlMemperluas = false;
+function pasangScrollTimeline() {
+    const c = document.getElementById('table-container'); if (!c) return;
+    c.addEventListener('scroll', () => {
+        if (_tlMemperluas || c.scrollLeft + c.clientWidth < c.scrollWidth - 60) return;
+        const endEl = document.getElementById('filter-end'), e = new Date(endEl.value); if (isNaN(e)) return;
+        const batas = new Date(document.getElementById('filter-start').value); batas.setDate(batas.getDate() + 3 * 366); if (e >= batas) return;   // maksimal 3 tahun
+        _tlMemperluas = true;
+        e.setDate(e.getDate() + 30); endEl.value = e.toISOString().split('T')[0];
+        const posisi = c.scrollLeft; renderTableTimeline(true); c.scrollLeft = posisi;
+        setTimeout(() => { _tlMemperluas = false; }, 150);
+    });
+}
 
 function renderLegendTimeline() {
     const container = document.getElementById('legend-container');
@@ -81,7 +99,7 @@ function renderLegendTimeline() {
     container.innerHTML = html;
 }
 
-function renderTableTimeline() {
+function renderTableTimeline(pertahankanPosisi) {
     const tglMulaiStr = document.getElementById('filter-start').value, tglSelesaiStr = document.getElementById('filter-end').value;
     if(!tglMulaiStr || !tglSelesaiStr) return alert("Pilih rentang tanggal terlebih dahulu!");
 
@@ -197,7 +215,7 @@ function renderTableTimeline() {
     
     document.getElementById('table-body').innerHTML = bodyHtml;
     // Auto Scroll ke Hari Ini
-    setTimeout(() => { const tCell = document.querySelector('.today-highlight-header'); if(tCell) document.getElementById('table-container').scrollLeft = tCell.offsetLeft - 300; }, 100);
+    if (!pertahankanPosisi) setTimeout(() => { const tCell = document.querySelector('.today-highlight-header'); if(tCell) document.getElementById('table-container').scrollLeft = tCell.offsetLeft - 300; }, 100);
 }
 
 function injectModalTimeline() {
