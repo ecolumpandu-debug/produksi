@@ -1,14 +1,14 @@
 // =========================================================================
 // OTENTIKASI & AWALAN APLIKASI
 // =========================================================================
-function logout() { location.reload(); }
+async function logout() { await sbLogout(); location.reload(); }
 
 async function doLogin() {
     showLoading("Mencocokkan Kredensial...");
     const uname = document.getElementById('username').value; const pass = document.getElementById('password').value;
     if(!uname || !pass) { hideLoading(); alert("Username dan Password tidak boleh kosong!"); return; }
 
-    const res = await apiPost({ action: 'login', username: uname, password: pass });
+    const res = await sbLogin(uname, pass);
     if (res && res.success) {
         document.getElementById('user-name').innerText = res.data.nama || uname;
         document.getElementById('user-role').innerText = res.data.jabatan || "Administrator";
