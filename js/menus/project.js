@@ -51,7 +51,7 @@ function cariProjectList() {
 }
 
 async function hapusProject(rowIndex) {
-    if(confirm("Hapus Project ini? Data akan hilang.")) {
+    if(confirm("Hapus Project ini beserta RAP Awal, RAP Final, dan Timeline-nya? Tidak bisa dibatalkan. (Riwayat kartu stok tidak ikut terhapus.)")) {
         showLoading("Menghapus Project...");
         const res = await apiDeleteMaster('Data_Project', rowIndex);
         if(res.success) loadProjectData(); else { hideLoading(); alert(res.message); }
