@@ -68,12 +68,12 @@ async function sbHapus(sheet, rowIndex) {
 // Login: username -> email, lalu peran dari tabel Profil.
 async function sbLogin(username, password) {
     try {
-        const email = String(username).trim().toLowerCase() + LOGIN_DOMAIN;
+        const u = String(username).trim().toLowerCase(), email = u.indexOf('@') !== -1 ? u : u + LOGIN_DOMAIN;   // boleh ketik username saja atau email lengkap
         const { data, error } = await sbKlien().auth.signInWithPassword({ email, password });
         if (error || !data || !data.user) return { success: false, message: 'Username atau Password salah!' };
         const pr = await sbKlien().from('Profil').select('Username,Role').eq('id', data.user.id).maybeSingle();
         const p = (pr && pr.data) || {};
-        return { success: true, data: { nama: p.Username || String(username).trim(), jabatan: p.Role || 'Staff' } };
+        return { success: true, data: { nama: p.Username || u.split('@')[0], jabatan: p.Role || 'Staff' } };
     } catch (e) { return { success: false, message: sbPesan(e) }; }
 }
 async function sbLogout() { try { await sbKlien().auth.signOut(); } catch (e) {} }
