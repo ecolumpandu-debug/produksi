@@ -11,42 +11,44 @@ async function renderVisualDashboard() {
 }
 
 function membangunUI_Dashboard(dashData, gudangData) {
-    let activeProj = 0, totalRev = 0, chartLabels = [], chartDataAwal = [], chartDataFinal = [];
+    const rp = n => 'Rp ' + Math.round(n || 0).toLocaleString('id-ID');
+    const persenPremi = (typeof PREMI_RAP === 'number' ? PREMI_RAP : 0.20);
+    let totalProject = 0, totalOmset = 0, totalPremi = 0, chartLabels = [], chartDataAwal = [], chartDataFinal = [];
     let statusCount = { 'Draft': 0, 'Perencanaan': 0, 'Sedang Berjalan': 0, 'Selesai': 0, 'Batal': 0 };
 
     dashData.forEach(p => {
-        if(p.Status === "Sedang Berjalan") activeProj++;
-        if(p.Status === "Selesai") totalRev += parseFloat(p.Total_Final || 0);
+        const final = parseFloat(p.Total_Final) || 0;                 // RAP Final sudah termasuk premi
+        totalProject++;                                               // semua status project
+        totalOmset += final;                                          // omset = total RAP Final (dasar + premi)
+        totalPremi += final - final / (1 + persenPremi);              // premi = bagian premi dari RAP Final
         if(statusCount[p.Status] !== undefined) statusCount[p.Status]++;
         if(chartLabels.length < 5 && (p.Status === 'Sedang Berjalan' || p.Status === 'Selesai')) {
-            let nameLable = p.Nama_Project ? p.Nama_Project.substring(0, 15) : p.Project_ID;
-            chartLabels.push(nameLable + (p.Nama_Project && p.Nama_Project.length > 15 ? '...' : ''));
-            chartDataAwal.push(parseFloat(p.Total_Awal) || 0); chartDataFinal.push(parseFloat(p.Total_Final) || 0);
+            let namaKlien = p.Nama_PIC_Klien ? p.Nama_PIC_Klien.substring(0, 18) : (p.Nama_Project || p.Project_ID);
+            chartLabels.push(namaKlien + (p.Nama_PIC_Klien && p.Nama_PIC_Klien.length > 18 ? '...' : ''));
+            chartDataAwal.push(parseFloat(p.Total_Awal) || 0); chartDataFinal.push(final);
         }
     });
 
-    let stokKosong = 0; gudangData.currentStock.forEach(s => { if(s.Total_Stok <= 0) stokKosong++; });
+    // Stok: total aset = jumlah nilai semua kolam (umum + alokasi); macam barang = jumlah nama material yang stoknya masih ada.
+    const kolam = gudangData.kolam || [];
+    const totalAset = kolam.reduce((t, k) => t + (parseFloat(k.Nilai) || 0), 0);
+    const stokPerItem = {}; kolam.forEach(k => { stokPerItem[k.Nama_Item] = (stokPerItem[k.Nama_Item] || 0) + (parseFloat(k.Stok) || 0); });
+    const macamBarang = Object.keys(stokPerItem).filter(n => stokPerItem[n] > 0).length;
 
+    const kartu = (judul, nilai, ikon, warna, ket) => `<div class="bg-white rounded-lg shadow p-5 border-l-4 border-${warna}-500 flex items-center justify-between"><div class="min-w-0"><p class="text-sm text-gray-500 font-semibold mb-1">${judul}</p><p class="text-xl font-bold text-gray-800 break-words">${nilai}</p>${ket ? `<p class="text-xs text-gray-400 mt-1">${ket}</p>` : ''}</div><div class="text-${warna}-200 text-4xl ml-2"><i class="fas ${ikon}"></i></div></div>`;
     let html = `
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <div class="bg-white rounded-lg shadow p-5 border-l-4 border-blue-500 flex items-center justify-between">
-            <div><p class="text-sm text-gray-500 font-semibold mb-1">Project Aktif</p><p class="text-3xl font-bold text-gray-800">${activeProj}</p></div><div class="text-blue-200 text-4xl"><i class="fas fa-hammer"></i></div>
-        </div>
-        <div class="bg-white rounded-lg shadow p-5 border-l-4 border-green-500 flex items-center justify-between">
-            <div><p class="text-sm text-gray-500 font-semibold mb-1">Omset (Selesai)</p><p class="text-xl font-bold text-gray-800">Rp ${(totalRev/1000000).toFixed(1)} Jt</p></div><div class="text-green-200 text-4xl"><i class="fas fa-wallet"></i></div>
-        </div>
-        <div class="bg-white rounded-lg shadow p-5 border-l-4 border-indigo-500 flex items-center justify-between">
-            <div><p class="text-sm text-gray-500 font-semibold mb-1">Macam Barang</p><p class="text-3xl font-bold text-gray-800">${gudangData.currentStock.length - stokKosong}</p></div><div class="text-indigo-200 text-4xl"><i class="fas fa-boxes"></i></div>
-        </div>
-        <div class="bg-white rounded-lg shadow p-5 border-l-4 border-red-500 flex items-center justify-between">
-            <div><p class="text-sm text-gray-500 font-semibold mb-1">Stok Habis</p><p class="text-3xl font-bold text-red-600">${stokKosong}</p></div><div class="text-red-200 text-4xl"><i class="fas fa-exclamation-triangle"></i></div>
-        </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4 mb-8">
+        ${kartu('Total Project', totalProject, 'fa-hammer', 'blue', 'Semua status project')}
+        ${kartu('Omset', rp(totalOmset), 'fa-wallet', 'green', 'Total RAP Final + premi')}
+        ${kartu('Total Premi', rp(totalPremi), 'fa-percent', 'amber', 'Premi ' + Math.round(persenPremi * 100) + '% dari semua RAP Final')}
+        ${kartu('Total Aset Stok', rp(totalAset), 'fa-warehouse', 'teal', 'Nilai stok umum + alokasi')}
+        ${kartu('Macam Barang', macamBarang, 'fa-boxes', 'indigo', 'Material yang ada di stok')}
     </div>
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <div class="md:col-span-2 bg-white rounded-lg shadow p-5"><h3 class="text-lg font-bold text-gray-700 mb-4 border-b pb-2">Kesehatan Anggaran Project</h3><div class="relative h-64 w-full"><canvas id="chart-anggaran"></canvas></div></div>
         <div class="bg-white rounded-lg shadow p-5"><h3 class="text-lg font-bold text-gray-700 mb-4 border-b pb-2">Distribusi Status</h3><div class="relative h-64 w-full"><canvas id="chart-status"></canvas></div></div>
     </div>
-    <div class="bg-white rounded-lg shadow overflow-hidden"><div class="p-4 bg-gray-800 text-white font-bold"><i class="fas fa-history mr-2"></i> 5 Aktivitas Gudang Terakhir</div><div class="overflow-x-auto"><table class="min-w-full text-left text-sm border-collapse"><thead><tr class="bg-gray-100 text-gray-600"><th class="p-3">Tanggal</th><th class="p-3">Material</th><th class="p-3">Keterangan</th><th class="p-3 text-center">In</th><th class="p-3 text-center">Out</th></tr></thead><tbody>`;
+    <div class="bg-white rounded-lg shadow overflow-hidden"><div class="p-4 bg-gray-800 text-white font-bold"><i class="fas fa-history mr-2"></i> 5 Aktivitas Stok Terakhir</div><div class="overflow-x-auto"><table class="min-w-full text-left text-sm border-collapse"><thead><tr class="bg-gray-100 text-gray-600"><th class="p-3">Tanggal</th><th class="p-3">Material</th><th class="p-3">Keterangan</th><th class="p-3 text-center">In</th><th class="p-3 text-center">Out</th></tr></thead><tbody>`;
     
     let recentLogs = gudangData.logs.slice(0, 5);
     if(recentLogs.length === 0) html += `<tr><td colspan="5" class="p-4 text-center italic text-gray-500">Belum ada transaksi.</td></tr>`;
