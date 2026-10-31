@@ -12,6 +12,8 @@ const SB_TABEL = {
     Data_RAP_Awal:      { pk: 'ID_RAP', kolom: ['ID_RAP', 'Project_ID', 'Kategori', 'Nama_Item', 'Satuan', 'Harga_Satuan', 'Qty', 'Total_Harga'], angka: ['Harga_Satuan', 'Qty', 'Total_Harga'] },
     Data_RAP_Final:     { pk: 'ID_Final', kolom: ['ID_Final', 'Project_ID', 'Kategori', 'Nama_Item', 'Satuan', 'Harga_Satuan', 'Qty', 'Total_Harga'], angka: ['Harga_Satuan', 'Qty', 'Total_Harga'] },
     Data_Timeline:      { pk: 'ID_Timeline', kolom: ['ID_Timeline', 'Project_ID', 'Kode_Tahapan', 'Tanggal_Mulai', 'Tanggal_Selesai'], angka: ['Kode_Tahapan'] },
+    Data_Kartu_Stok:    { pk: 'Log_ID', kolom: ['Log_ID', 'Tanggal', 'Nama_Material', 'Jenis_Transaksi', 'Kategori_Alokasi', 'Project_ID', 'Qty_Masuk', 'Qty_Keluar', 'Satuan', 'Harga_Satuan', 'Total_Nilai', 'Referensi'], angka: ['Qty_Masuk', 'Qty_Keluar', 'Harga_Satuan', 'Total_Nilai'], urut: 'Urutan' },   // urut: kolom nomor urut pencatatan; hitungan stok bergantung pada urutan ini
+    Data_Surat_Jalan:   { pk: 'Surat_Jalan_ID', kolom: ['Surat_Jalan_ID', 'Tanggal', 'Project_ID', 'Brand', 'Nama_Klien', 'Nama_Project', 'Alamat_Project', 'Nama_Supir', 'No_Kendaraan', 'Catatan', 'Ringkasan_Item', 'Items_JSON'] },
     Master_Operational: { pk: 'Ops_ID', kolom: ['Ops_ID', 'Kategori', 'Nama_Operasional', 'Satuan', 'Biaya_Estimasi', 'Keterangan_Area'], angka: ['Biaya_Estimasi'] }
 };
 // rowIndex = nomor tetap per primary key selama halaman dibuka (bukan urutan baris). Jadi bila ada pembacaan ulang atau
@@ -34,7 +36,9 @@ async function sbBacaSheet(sheet) {
     try {
         const t = SB_TABEL[sheet], semua = [], BATCH = 1000;
         for (let dari = 0; ; dari += BATCH) {
-            const { data, error } = await sbKlien().from(sheet).select('*').order(t.pk, { ascending: true }).range(dari, dari + BATCH - 1);
+            const baca = kolomUrut => sbKlien().from(sheet).select('*').order(kolomUrut, { ascending: true }).order(t.pk, { ascending: true }).range(dari, dari + BATCH - 1);
+            let { data, error } = await baca(t.urut || t.pk);
+            if (error && t.urut && /Urutan/i.test(error.message || '')) ({ data, error } = await baca(t.pk));   // kolom Urutan belum dibuat: urutkan menurut ID
             if (error) return { success: false, message: sbPesan(error) };
             semua.push(...data); if (data.length < BATCH) break;
         }
@@ -144,4 +148,46 @@ async function sbTimelineBatch(pId, rows) {
         const { error } = await q; if (error) return { success: false, message: sbPesan(error) };
         return { success: true, message: 'Jadwal Timeline Tersimpan' };
     } catch (e) { return { success: false, message: sbPesan(e) }; }
+}
+
+
+// ---------- KARTU STOK: hitungan kolam stok (umum + alokasi per project) di front-end ----------
+// Port persis dari Apps Script (hitungKolamStok_). rows harus berurutan dari lama ke baru.
+const KAT_LEPAS = 'Lepas Alokasi', KAT_PINDAH = 'Pindah Alokasi', KAT_KOREKSI_ALOKASI = 'Koreksi Alokasi';
+function awalKategori(row, awalan) { return String(row.Kategori_Alokasi || '').indexOf(awalan) === 0; }
+function hitungKolamStok(rows) {
+    const items = {}, urutan = [];
+    const kolamBaru = () => ({ q: 0, v: 0 });
+    const kolamAlok = (it, pid) => { if (!it.alok[pid]) { it.alok[pid] = kolamBaru(); it.urutAlok.push(pid); } return it.alok[pid]; };
+    const ambil = (k, qty) => { const a = Math.min(Math.max(k.q, 0), qty); if (a > 0) { const avg = k.v / k.q; k.v -= a * avg; k.q -= a; } return qty - a; };
+    rows.forEach(row => {
+        const nama = row.Nama_Material || row.Nama_Item; if (!nama) return;
+        let it = items[nama]; if (!it) { it = items[nama] = { satuan: row.Satuan, umum: kolamBaru(), alok: {}, urutAlok: [], hargaTerakhir: 0 }; urutan.push(nama); }
+        const qIn = parseFloat(row.Qty_Masuk) || 0, qOut = parseFloat(row.Qty_Keluar) || 0, h = parseFloat(row.Harga_Satuan) || 0, pid = String(row.Project_ID || '').trim();
+        if (qIn > 0) { if (h > 0) it.hargaTerakhir = h; const k = pid ? kolamAlok(it, pid) : it.umum; k.q += qIn; k.v += qIn * h; }
+        if (qOut > 0) {
+            let sisa = qOut;
+            const khusus = pid && (awalKategori(row, KAT_LEPAS) || awalKategori(row, KAT_PINDAH) || awalKategori(row, KAT_KOREKSI_ALOKASI));
+            if (khusus) { const ka = kolamAlok(it, pid); sisa = ambil(ka, sisa); if (sisa > 0) ka.q -= sisa; }
+            else if (pid && awalKategori(row, KAT_PEMAKAIAN)) { sisa = ambil(kolamAlok(it, pid), sisa); sisa = ambil(it.umum, sisa); if (sisa > 0) it.umum.q -= sisa; }
+            else { sisa = ambil(it.umum, sisa); for (let i = 0; i < it.urutAlok.length && sisa > 0; i++) sisa = ambil(it.alok[it.urutAlok[i]], sisa); if (sisa > 0) it.umum.q -= sisa; }
+        }
+    });
+    const bulat = n => Math.round(n * 10000) / 10000;
+    const baris = (nama, it, k, pid) => { const positif = k.q > 0; return { Nama_Item: nama, Satuan: it.satuan, Kolam: pid ? 'Project' : 'Umum', Project_ID: pid, Stok: bulat(k.q), Harga: positif ? Math.round(k.v / k.q * 100) / 100 : it.hargaTerakhir, Nilai: positif ? Math.round(k.v * 100) / 100 : 0 }; };
+    const hasil = [];
+    urutan.forEach(nama => { const it = items[nama]; hasil.push(baris(nama, it, it.umum, '')); it.urutAlok.forEach(pid => { if (Math.abs(it.alok[pid].q) > 0.00005) hasil.push(baris(nama, it, it.alok[pid], pid)); }); });
+    return hasil;
+}
+// Stok total per nama material (masuk - keluar), dengan satuan dari baris pertama.
+function hitungStokPerItem(rows) {
+    const peta = {};
+    rows.forEach(r => { const n = r.Nama_Material || r.Nama_Item; if (!n) return; const o = peta[n] || (peta[n] = { Nama_Item: n, Satuan: r.Satuan, Total_Stok: 0 }); o.Total_Stok += (parseFloat(r.Qty_Masuk) || 0) - (parseFloat(r.Qty_Keluar) || 0); });
+    return Object.keys(peta).map(k => peta[k]);
+}
+// Pengganti GET getGudangData: { currentStock, logs (terbaru di atas), kolam }.
+async function sbGudang() {
+    const r = await sbBacaSheet('Data_Kartu_Stok'); if (!r.success) return r;
+    const urut = r.data;   // lama -> baru (urut Log_ID = urut waktu pencatatan)
+    return { success: true, data: { currentStock: hitungStokPerItem(urut.slice().reverse()), logs: urut.slice().reverse(), kolam: hitungKolamStok(urut) } };
 }

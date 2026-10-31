@@ -13,4 +13,4 @@ const API_URL = "https://script.google.com/macros/s/AKfycbztuEn05TEMzsgl_TmJYSZM
 const SUPABASE_URL = "https://oqjgltjpnwmswsawjpmu.supabase.co";
 const SUPABASE_KEY = "sb_publishable_Ry8pW-7KMfG1xTEdCmPaIw_5FJnU-iF";
 const LOGIN_DOMAIN = "@ecolum.com";   // username "endo" masuk sebagai endo@ecolum.com
-const SB_MIGRASI = ['Master_Material', 'Master_Jasa', 'Master_Operational', 'Master_Supplier', 'Data_Project', 'Data_RAP_Awal', 'Data_RAP_Final', 'Data_Timeline'];
+const SB_MIGRASI = ['Master_Material', 'Master_Jasa', 'Master_Operational', 'Master_Supplier', 'Data_Project', 'Data_RAP_Awal', 'Data_RAP_Final', 'Data_Timeline', 'Data_Kartu_Stok', 'Data_Surat_Jalan'];

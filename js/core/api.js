@@ -2,13 +2,13 @@
 // MESIN KOMUNIKASI API (FETCH)
 // =========================================================================
 function sheetDariParams(params) { const m = /[?&]sheetName=([^&]+)/.exec('&' + String(params).replace(/^&/, '')); return m ? decodeURIComponent(m[1]) : ''; }
-// Kartu stok (getGudangData) masih dari Apps Script. Hasil dipakai bersama 3 detik supaya dashboard/workspace
+// Kartu stok (getGudangData): dari Supabase bila Data_Kartu_Stok ada di SB_MIGRASI, kalau tidak dari Apps Script. Hasil dipakai bersama 3 detik supaya dashboard/workspace
 // tidak memanggilnya dua kali; dibuang segera setelah ada penulisan data.
 let _gudangMemo = null, _gudangWaktu = 0;
 function apiGudang() {
     if (_gudangMemo && Date.now() - _gudangWaktu < 3000) return _gudangMemo;
     _gudangWaktu = Date.now();
-    _gudangMemo = apiAppsScript('getGudangData', '').then(r => { if (!r.success) _gudangMemo = null; return r; });
+    _gudangMemo = (sbMigrasi('Data_Kartu_Stok') ? sbGudang() : apiAppsScript('getGudangData', '')).then(r => { if (!r.success) _gudangMemo = null; return r; });
     return _gudangMemo;
 }
 function bersihkanCacheGudang() { _gudangMemo = null; }
