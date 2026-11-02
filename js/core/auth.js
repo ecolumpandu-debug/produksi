@@ -9,10 +9,17 @@ async function doLogin() {
     if(!uname || !pass) { hideLoading(); alert("Username dan Password tidak boleh kosong!"); return; }
 
     const res = await sbLogin(uname, pass);
-    if (res && res.success) {
+    if (res && res.success) await masukAplikasi(res.data, uname);
+    else { hideLoading(); alert((res && res.message) || "Username atau Password salah!"); }
+}
+
+// Dipakai setelah login berhasil DAN saat sesi lama dipulihkan (muat ulang halaman).
+async function masukAplikasi(user, uname) {
+    {
+        const res = { data: user };
         document.getElementById('user-name').innerText = res.data.nama || uname;
         document.getElementById('user-role').innerText = res.data.jabatan || "Administrator";
-        document.getElementById('user-initial').innerText = (res.data.nama || uname).charAt(0).toUpperCase();
+        document.getElementById('user-initial').innerText = (res.data.nama || uname || '?').charAt(0).toUpperCase();
 
         terapkanPeran(res.data.jabatan);   // sembunyikan menu sesuai peran (Designer hanya Project & Master)
         document.getElementById('login-section').style.display = 'none';
@@ -28,5 +35,13 @@ async function doLogin() {
         if(resMat.success) masterMaterial = resMat.data; if(resJas.success) masterJasa = resJas.data; if(resOps.success) masterOps = resOps.data;
         
         showMenu(menuAwal()); 
-    } else { hideLoading(); alert(res.message || "Username atau Password salah!"); }
+    }
 }
+
+// Saat halaman dibuka: bila masih ada sesi login tersimpan, langsung masuk tanpa mengetik ulang.
+async function pulihkanSesi() {
+    const sesi = await sbPulihSesi();
+    if (sesi && sesi.success) { showLoading("Memulihkan sesi..."); await masukAplikasi(sesi.data, sesi.data.nama); }
+}
+// Tunggu semua berkas JS selesai dimuat (menus.js, router.js dimuat setelah berkas ini).
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', pulihkanSesi); else pulihkanSesi();

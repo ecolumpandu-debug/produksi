@@ -26,7 +26,7 @@ function sbNo(tabel, pk) {
 }
 
 function sbKlien() {
-    if (!_sbKlien) _sbKlien = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false, autoRefreshToken: true } });
+    if (!_sbKlien) _sbKlien = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'ecolum-sesi' } });
     return _sbKlien;
 }
 function sbMigrasi(sheet) { return SB_MIGRASI.indexOf(sheet) !== -1 && !!SB_TABEL[sheet]; }
@@ -89,6 +89,16 @@ async function sbLogin(username, password) {
         const p = (pr && pr.data) || {};
         return { success: true, data: { nama: p.Username || u.split('@')[0], jabatan: p.Role || 'Staff' } };
     } catch (e) { return { success: false, message: sbPesan(e) }; }
+}
+// Pulihkan sesi login yang tersimpan di browser (agar muat ulang halaman tidak keluar sendiri). Mengembalikan data yang sama seperti sbLogin, atau null bila belum login.
+async function sbPulihSesi() {
+    try {
+        const { data } = await sbKlien().auth.getSession(); const user = data && data.session && data.session.user; if (!user) return null;
+        const pr = await sbKlien().from('Profil').select('Username,Role').eq('id', user.id).maybeSingle();
+        if (pr && pr.error && /JWT|expired|invalid/i.test(pr.error.message || '')) { await sbKlien().auth.signOut(); return null; }
+        const p = (pr && pr.data) || {};
+        return { success: true, data: { nama: p.Username || String(user.email || '').split('@')[0], jabatan: p.Role || 'Staff' } };
+    } catch (e) { return null; }
 }
 async function sbLogout() { try { await sbKlien().auth.signOut(); } catch (e) {} }
 

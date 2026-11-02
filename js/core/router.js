@@ -19,6 +19,7 @@ function muatScript(src) {
 }
 
 async function showMenu(menu) {
+    if (window.event && window.event.preventDefault && window.event.type === 'click' && window.event.currentTarget && window.event.currentTarget.tagName === 'A') window.event.preventDefault();   // cegah tanda # di alamat
     // Sorot menu di sidebar. Harus sebelum await pertama, karena window.event hanya ada selama klik diproses.
     document.querySelectorAll('.menu-item').forEach(a => a.classList.remove('bg-gray-700', 'border-l-4', 'border-indigo-500'));
     if (event && event.currentTarget) event.currentTarget.classList.add('bg-gray-700', 'border-l-4', 'border-indigo-500');
