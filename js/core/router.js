@@ -26,7 +26,7 @@ async function showMenu(menu) {
     document.getElementById('main-content').innerHTML = '';
 
     const cfg = MENUS[menu];
-    if (!cfg) return;
+    if (!cfg || !menuBoleh(menu)) return;   // menu di luar hak peran tidak dibuka
     const token = ++_tokenMenu;
     const berkas = cfg.files.map(f => 'js/menus/' + f + '.js');
     if (berkas.some(b => !_scriptTerpasang[b])) showLoading('Memuat modul menu...');

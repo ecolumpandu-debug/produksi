@@ -14,6 +14,7 @@ async function doLogin() {
         document.getElementById('user-role').innerText = res.data.jabatan || "Administrator";
         document.getElementById('user-initial').innerText = (res.data.nama || uname).charAt(0).toUpperCase();
 
+        terapkanPeran(res.data.jabatan);   // sembunyikan menu sesuai peran (Designer hanya Project & Master)
         document.getElementById('login-section').style.display = 'none';
         let appSec = document.getElementById('app-section');
         appSec.classList.remove('hidden'); appSec.style.display = 'flex';
@@ -26,6 +27,6 @@ async function doLogin() {
         ]);
         if(resMat.success) masterMaterial = resMat.data; if(resJas.success) masterJasa = resJas.data; if(resOps.success) masterOps = resOps.data;
         
-        showMenu('Dashboard'); 
+        showMenu(menuAwal()); 
     } else { hideLoading(); alert(res.message || "Username atau Password salah!"); }
 }
