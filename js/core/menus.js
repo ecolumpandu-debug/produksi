@@ -28,8 +28,10 @@ const MENUS = {
 // Peran diambil dari tabel Profil (kolom Role). Peran yang TIDAK tercantum di bawah (Administrator, Kepala Produksi, dst.)
 // otomatis boleh semua menu. Peran yang tercantum hanya melihat menu dalam daftarnya; menu lain disembunyikan dari sidebar.
 // =========================================================================
+const MENU_TERBATAS = { menu: ['Project', 'Timeline', 'RAP_Awal', 'RAP_Belanja', 'RAP_Final', 'Master_Material', 'Master_Jasa', 'Master_Operasional', 'Master_Supplier'], awal: 'Project' };
 const PERAN_MENU = {
-    designer: { menu: ['Project', 'Timeline', 'RAP_Awal', 'RAP_Belanja', 'RAP_Final', 'Master_Material', 'Master_Jasa', 'Master_Operasional', 'Master_Supplier'], awal: 'Project' }
+    designer: MENU_TERBATAS,
+    purchasing: MENU_TERBATAS   // hak sama dengan Designer
 };
 let _peranAktif = '';
 function aturanPeran() { return PERAN_MENU[String(_peranAktif || '').trim().toLowerCase()] || null; }
