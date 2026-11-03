@@ -13,17 +13,20 @@ async function renderMenuRAP(jenisMenu) {
     if(res.success) {
         currentProjectData = res.data;
         let judul = jenisMenu.replace('_', ' ');
-        let html = `<div class="bg-white rounded p-4 mb-4 shadow border-t-4 border-indigo-600"><div class="flex justify-between items-center mb-4"><h2 class="text-xl font-bold text-gray-800">Pilih Project untuk ${judul}</h2><div class="relative"><i class="fas fa-search absolute left-3 top-2.5 text-gray-400"></i><input type="text" id="cari-rap" onkeyup="filterRapProject()" placeholder="Cari Project..." class="pl-10 border p-2 rounded w-64 text-sm focus:outline-indigo-500"></div></div><div id="grid-rap-project" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">`;
+        const warna = { 'Sedang Berjalan': 'bg-blue-100 text-blue-700', 'Selesai': 'bg-green-100 text-green-700', 'Batal': 'bg-red-100 text-red-700' };
+        let html = `<div class="bg-white rounded p-4 mb-4 shadow border-t-4 border-indigo-600"><div class="flex flex-wrap gap-2 justify-between items-center mb-3"><h2 class="text-xl font-bold text-gray-800">Pilih Project untuk ${judul} <span class="text-sm font-normal text-gray-400">(<span id="jml-rap">${res.data.length}</span> project)</span></h2><div class="relative"><i class="fas fa-search absolute left-3 top-2.5 text-gray-400"></i><input type="text" id="cari-rap" onkeyup="filterRapProject()" placeholder="Cari klien / project..." class="pl-10 border p-2 rounded w-64 text-sm focus:outline-indigo-500"></div></div><div id="grid-rap-project" class="border rounded divide-y overflow-hidden">`;
         res.data.forEach(p => {
-            html += `<div class="card-rap border rounded p-4 hover:shadow-lg bg-gray-50" data-nama="${(p.Nama_Project||'').toLowerCase()}" data-klien="${(p.Nama_PIC_Klien||'').toLowerCase()}"><div class="font-bold text-xl text-indigo-900 mb-2"><i class="fas fa-user-tag mr-2"></i>${p.Nama_PIC_Klien||'-'}</div><div class="text-sm text-gray-600 mb-4 bg-white p-2 rounded"><div><span class="font-semibold text-gray-500 w-16 inline-block">Project:</span> ${p.Nama_Project}</div></div><button onclick="bukaWorkspaceRAP('${jenisMenu}', '${p.Project_ID}')" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded shadow font-semibold"><i class="fas fa-folder-open mr-1"></i> Buka ${judul}</button></div>`;
+            const st = p.Status || '';
+            html += `<div class="card-rap flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-indigo-50" onclick="bukaWorkspaceRAP('${jenisMenu}', '${p.Project_ID}')" title="Buka ${judul}" data-nama="${(p.Nama_Project||'').toLowerCase()}" data-klien="${(p.Nama_PIC_Klien||'').toLowerCase()}"><i class="fas fa-user-tag text-indigo-400 w-5 text-center"></i><div class="min-w-0 flex-1"><span class="font-bold text-indigo-900">${p.Nama_PIC_Klien||'-'}</span><span class="text-gray-400 mx-2">&middot;</span><span class="text-sm text-gray-600">${p.Nama_Project||''}</span></div>${st ? `<span class="hidden sm:inline text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${warna[st]||'bg-gray-100 text-gray-600'}">${st}</span>` : ''}<i class="fas fa-chevron-right text-gray-300 text-xs"></i></div>`;
         });
-        document.getElementById('main-content').innerHTML = html + `</div></div>`;
+        document.getElementById('main-content').innerHTML = html + `</div><div id="rap-kosong" class="hidden p-4 text-center text-gray-400 italic text-sm">Tidak ada project yang cocok.</div></div>`;
     } else alert("Gagal muat Project!");
 }
 
 function filterRapProject() {
     const kw = document.getElementById('cari-rap').value.toLowerCase();
-    document.querySelectorAll('.card-rap').forEach(c => c.style.display = (c.getAttribute('data-nama').includes(kw) || c.getAttribute('data-klien').includes(kw)) ? 'block' : 'none');
+    let n = 0; document.querySelectorAll('.card-rap').forEach(c => { const cocok = c.getAttribute('data-nama').includes(kw) || c.getAttribute('data-klien').includes(kw); c.style.display = cocok ? '' : 'none'; if (cocok) n++; });
+    const jml = document.getElementById('jml-rap'), kosong = document.getElementById('rap-kosong'); if (jml) jml.innerText = n; if (kosong) kosong.classList.toggle('hidden', n > 0);
 }
 
 async function bukaWorkspaceRAP(jenisMenu, pId) {
