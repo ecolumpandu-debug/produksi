@@ -375,27 +375,43 @@ function rekapAlokasiStok() {
     const proj = currentProjectData.map(p => p.Project_ID), kunci = urut.filter(k => k !== '').sort((a, b) => (proj.indexOf(a) + 1 || 9999) - (proj.indexOf(b) + 1 || 9999));
     return [grup['']].concat(kunci.map(k => grup[k]));
 }
+let _rekapSemua = [];
 function renderRekapAlokasi() {
     const area = document.getElementById('area-rekap'); if (!area) return;
-    const semua = rekapAlokasiStok(), kw = stokCari || '';
+    const semua = _rekapSemua = rekapAlokasiStok(), kw = stokCari || '';
     let tMasuk = 0, tSisa = 0; semua.forEach(g => { tMasuk += g.masuk; tSisa += g.sisa; });
-    let h = `<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4"><div class="bg-green-50 border border-green-200 rounded p-3"><div class="text-xs text-green-700 font-semibold uppercase">Total Barang Masuk (Belanja)</div><div id="rekap-total-masuk" class="text-lg font-bold text-green-900">${rpStok(tMasuk)}</div></div><div class="bg-indigo-50 border border-indigo-200 rounded p-3"><div class="text-xs text-indigo-600 font-semibold uppercase">Sisa Stok Saat Ini</div><div id="rekap-total-sisa" class="text-lg font-bold text-indigo-900">${rpStok(tSisa)}</div></div><div class="bg-gray-50 border rounded p-3 text-xs text-gray-500">Barang Masuk = total pembelian yang pernah dicatat. Sisa Stok = yang masih ada di gudang. Angka Barang Masuk per project sama dengan kolom Alokasi Stok di Daftar Project.</div></div>`;
+    let h = `<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4"><div class="bg-green-50 border border-green-200 rounded p-3"><div class="text-xs text-green-700 font-semibold uppercase">Total Barang Masuk (Belanja)</div><div id="rekap-total-masuk" class="text-lg font-bold text-green-900">${rpStok(tMasuk)}</div></div><div class="bg-indigo-50 border border-indigo-200 rounded p-3"><div class="text-xs text-indigo-600 font-semibold uppercase">Sisa Stok Saat Ini</div><div id="rekap-total-sisa" class="text-lg font-bold text-indigo-900">${rpStok(tSisa)}</div></div><div class="bg-gray-50 border rounded p-3 text-xs text-gray-500">Barang Masuk = total pembelian yang pernah dicatat. Sisa Stok = yang masih ada di gudang. Klik Cetak untuk melihat detail barang per alokasi dan menyimpannya sebagai PDF.</div></div>`;
     let ada = 0;
-    semua.forEach(g => {
-        const label = g.pid === '' ? 'Stok Umum' : labelProjectStok(g.pid), cocokGrup = !kw || label.toLowerCase().indexOf(kw) !== -1;
-        let items = Object.keys(g.item).map(n => g.item[n]); if (!cocokGrup) items = items.filter(i => String(i.nama || '').toLowerCase().indexOf(kw) !== -1);
-        if (!cocokGrup && items.length === 0) return;
+    h += `<div class="border rounded divide-y overflow-hidden">`;
+    semua.forEach((g, idx) => {
+        const label = g.pid === '' ? 'Stok Umum' : labelProjectStok(g.pid);
+        if (kw && label.toLowerCase().indexOf(kw) === -1 && !Object.keys(g.item).some(n => n.toLowerCase().indexOf(kw) !== -1)) return;
         ada++;
         const badge = g.pid === '' ? `<span class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-0.5 rounded">Stok Umum</span>` : `<span class="font-bold text-indigo-900"><i class="fas fa-user-tag mr-1 text-indigo-400"></i>${escStok(label)}</span>`;
-        h += `<details class="rekap-grup border rounded mb-2" ${kw && !cocokGrup ? 'open' : ''}><summary class="cursor-pointer flex flex-wrap items-center gap-x-6 gap-y-1 px-3 py-2 bg-gray-50 hover:bg-indigo-50"><span class="flex-1 min-w-0">${badge} <span class="text-xs text-gray-400 ml-2">${items.length} barang</span></span><span class="text-sm text-gray-600">Barang Masuk: <b class="text-green-700 rekap-masuk">${rpStok(g.masuk)}</b></span><span class="text-sm text-gray-600">Sisa Stok: <b class="text-indigo-700 rekap-sisa">${rpStok(g.sisa)}</b></span></summary>`;
-        if (items.length === 0) h += `<div class="p-3 text-sm italic text-gray-500">Belum ada barang.</div>`;
-        else {
-            h += `<div class="overflow-x-auto"><table class="min-w-full text-sm"><thead><tr class="text-xs text-gray-500 uppercase border-b"><th class="p-2 text-left">Barang</th><th class="p-2 text-center">Qty Masuk</th><th class="p-2 text-right">Nilai Masuk</th><th class="p-2 text-center">Sisa Stok</th><th class="p-2 text-right">Nilai Sisa</th></tr></thead><tbody>`;
-            items.forEach(i => { h += `<tr class="border-b hover:bg-gray-50"><td class="p-2 font-medium text-gray-700">${escStok(i.nama)} <span class="text-xs text-gray-400">(${escStok(i.satuan || '-')})</span></td><td class="p-2 text-center">${bulatStok(i.qtyMasuk)}</td><td class="p-2 text-right">${rpStok(i.nilaiMasuk)}</td><td class="p-2 text-center font-semibold ${i.stok <= 0 ? 'text-red-500' : 'text-green-600'}">${bulatStok(i.stok)}</td><td class="p-2 text-right">${rpStok(i.nilaiStok)}</td></tr>`; });
-            h += `</tbody></table></div>`;
-        }
-        h += `</details>`;
+        h += `<div class="rekap-grup flex flex-wrap items-center gap-x-6 gap-y-1 px-3 py-2 hover:bg-indigo-50"><span class="flex-1 min-w-0 cursor-pointer" onclick="cetakRekapAlokasi(${idx})">${badge} <span class="text-xs text-gray-400 ml-2">${Object.keys(g.item).length} barang</span></span><span class="text-sm text-gray-600">Barang Masuk: <b class="text-green-700 rekap-masuk">${rpStok(g.masuk)}</b></span><span class="text-sm text-gray-600">Sisa Stok: <b class="text-indigo-700 rekap-sisa">${rpStok(g.sisa)}</b></span><button onclick="cetakRekapAlokasi(${idx})" title="Lihat dan cetak / simpan PDF" class="bg-green-600 hover:bg-green-700 text-white text-xs font-semibold px-3 py-1.5 rounded shadow whitespace-nowrap"><i class="fas fa-print mr-1"></i>Cetak</button></div>`;
     });
-    if (!ada) h += `<div class="p-4 text-center italic text-gray-500">Tidak ada alokasi yang cocok.</div>`;
+    h += `</div>`;
+    if (!ada) h = h.replace(/<div class="border rounded divide-y overflow-hidden"><\/div>$/, '') + `<div class="p-4 text-center italic text-gray-500">Tidak ada alokasi yang cocok.</div>`;
     area.innerHTML = h;
+}
+
+// Halaman cetak satu alokasi (Stok Umum / satu project): daftar barang yang masuk + sisa stok. Cetak -> "Simpan sebagai PDF".
+async function kembaliKeRekapStok() { await renderStokData(); switchTabStok('rekap'); }
+function cetakRekapAlokasi(idx) {
+    const g = _rekapSemua[idx]; if (!g) return alert('Data alokasi tidak ditemukan. Muat ulang menu Data Stok.');
+    const umum = g.pid === '', p = umum ? null : currentProjectData.find(x => x.Project_ID === g.pid);
+    const items = Object.keys(g.item).map(n => g.item[n]);
+    let tQtyMasuk = 0; items.forEach(i => { tQtyMasuk += i.qtyMasuk; });
+    const info = (l, v) => `<tr><td class="py-0.5 pr-3 text-gray-600 align-top whitespace-nowrap">${l}</td><td class="py-0.5 pr-2 align-top">:</td><td class="py-0.5 font-semibold">${escStok(v) || '-'}</td></tr>`;
+    const baris = items.length === 0 ? `<tr><td colspan="7" class="p-3 border text-center italic text-gray-500">Belum ada barang.</td></tr>` : items.map((i, n) => `<tr><td class="p-2 border text-center">${n + 1}</td><td class="p-2 border">${escStok(i.nama)}</td><td class="p-2 border text-center">${escStok(i.satuan || '-')}</td><td class="p-2 border text-center">${bulatStok(i.qtyMasuk)}</td><td class="p-2 border text-right">${rpStok(i.nilaiMasuk)}</td><td class="p-2 border text-center">${bulatStok(i.stok)}</td><td class="p-2 border text-right">${rpStok(i.nilaiStok)}</td></tr>`).join('');
+    const ttd = j => `<div class="text-center"><p class="font-semibold mb-20">${j}</p><div class="border-t border-gray-800 pt-2 text-left"><p>Nama : ..............................</p></div></div>`;
+    document.getElementById('main-content').innerHTML = `<div class="flex justify-between items-center mb-4 no-print"><button onclick="kembaliKeRekapStok()" class="bg-gray-500 text-white px-4 py-2 rounded"><i class="fas fa-arrow-left mr-2"></i>Kembali</button><button onclick="window.print()" class="bg-green-600 text-white px-4 py-2 rounded"><i class="fas fa-print mr-2"></i>Cetak / Simpan PDF</button></div>
+    <div class="print-area bg-white p-8 rounded-lg shadow-lg">
+        <div class="text-center mb-6"><h2 class="text-2xl font-bold uppercase tracking-wide">Rekap Alokasi Stok</h2><p class="text-sm text-gray-600 mt-1">${umum ? 'Stok Umum' : 'Alokasi Project'}</p></div>
+        <div class="grid grid-cols-2 gap-6 text-sm mb-6"><table><tbody>${umum ? info('Alokasi', 'Stok Umum (dipakai semua project)') : info('Klien', p ? p.Nama_PIC_Klien : '') + info('Project', p ? p.Nama_Project : g.pid) + info('ID Project', g.pid) + info('Alamat', p ? p.Alamat_Project : '')}</tbody></table><table><tbody>${info('Tanggal Cetak', tglLokalStok().split('-').reverse().join('-'))}${info('Jumlah Barang', String(items.length))}</tbody></table></div>
+        <table class="w-full text-sm border-collapse mb-4"><thead><tr class="bg-gray-100"><th class="p-2 border w-10">No</th><th class="p-2 border text-left">Nama Barang</th><th class="p-2 border">Satuan</th><th class="p-2 border">Qty Masuk</th><th class="p-2 border text-right">Nilai Masuk</th><th class="p-2 border">Sisa Stok</th><th class="p-2 border text-right">Nilai Sisa</th></tr></thead><tbody>${baris}</tbody>
+        <tfoot><tr class="bg-gray-50 font-bold"><td colspan="3" class="p-2 border text-right">TOTAL</td><td class="p-2 border text-center">${bulatStok(tQtyMasuk)}</td><td class="p-2 border text-right rekap-cetak-masuk">${rpStok(g.masuk)}</td><td class="p-2 border"></td><td class="p-2 border text-right rekap-cetak-sisa">${rpStok(g.sisa)}</td></tr></tfoot></table>
+        <p class="text-xs text-gray-500 mb-2">Nilai Masuk = total pembelian yang dialokasikan${umum ? ' ke stok umum' : ' ke project ini'}. Sisa Stok = yang masih ada di gudang saat dicetak.</p>
+        <div class="mt-10 grid grid-cols-2 gap-8 text-sm" style="break-inside:avoid;page-break-inside:avoid">${ttd('Dibuat oleh')}${ttd('Mengetahui')}</div>
+    </div>`;
 }
