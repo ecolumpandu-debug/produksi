@@ -105,6 +105,8 @@ async function sbLogout() { try { await sbKlien().auth.signOut(); } catch (e) {}
 // ---------- GABUNGAN: data project (Supabase) + kartu stok (masih Apps Script sampai Manajemen Stok dipindah) ----------
 const PREMI_RAP = 0.20;   // premi 20%, sama dengan Workspace RAP
 const KAT_PEMAKAIAN = 'Dipakai Project';
+// Belanja (Barang Masuk) yang dialokasikan khusus ke satu project. Pindah/Koreksi Alokasi sengaja tidak dihitung.
+function belanjaProject(r) { return (parseFloat(r.Qty_Masuk) > 0) && String(r.Project_ID || '').trim() !== '' && String(r.Kategori_Alokasi || '').indexOf('Pembelian Project') === 0; }
 function pemakaianProject(r) { return (parseFloat(r.Qty_Keluar) > 0) && String(r.Project_ID || '').trim() !== '' && String(r.Kategori_Alokasi || '').indexOf(KAT_PEMAKAIAN) === 0; }
 function jumlahPer(rows, kolom, syarat) { const h = {}; rows.forEach(r => { if (syarat && !syarat(r)) return; h[r.Project_ID] = (h[r.Project_ID] || 0) + (parseFloat(r[kolom]) || 0); }); return h; }
 async function sbBacaBanyak(daftar) {
@@ -117,9 +119,9 @@ async function sbDashboard() {
     const [tabel, gud] = await Promise.all([sbBacaBanyak(['Data_Project', 'Data_RAP_Awal', 'Data_RAP_Final']), apiGudang()]);
     if (!tabel.success) return tabel; if (!gud.success) return gud;
     const [projects, awal, fin] = tabel.data;
-    const tAwal = jumlahPer(awal, 'Total_Harga'), tMat = jumlahPer(gud.data.logs.slice().reverse(), 'Total_Nilai', pemakaianProject), tJasa = jumlahPer(fin, 'Total_Harga');
+    const tBelanja = jumlahPer(gud.data.logs, 'Total_Nilai', belanjaProject), tAwal = jumlahPer(awal, 'Total_Harga'), tMat = jumlahPer(gud.data.logs.slice().reverse(), 'Total_Nilai', pemakaianProject), tJasa = jumlahPer(fin, 'Total_Harga');
     projects.forEach(p => {
-        const a = tAwal[p.Project_ID] || 0; p.Total_Awal = a + a * PREMI_RAP;
+        const a = tAwal[p.Project_ID] || 0; p.Total_Awal = a + a * PREMI_RAP; p.Alokasi_Stok = tBelanja[p.Project_ID] || 0;
         const dasar = (tMat[p.Project_ID] || 0) + (tJasa[p.Project_ID] || 0); p.Total_Final = dasar + dasar * PREMI_RAP;
     });
     return { success: true, data: projects };
