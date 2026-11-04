@@ -4,10 +4,10 @@
 // =========================================================================
 function renderWSFinal() {
     let html = renderHeaderWS("RAP Final", "RAP_Final");
-    html += `<h3 class="font-bold mb-2">1. MATERIAL</h3><table class="w-full text-sm border-collapse mb-6"><thead><tr class="bg-gray-100"><th class="p-2 border w-1/2">Nama Material</th><th class="p-2 border">Qty</th><th class="p-2 border">Harga Aktual</th><th class="p-2 border">Total Riil</th><th class="p-2 border text-center no-print">Aksi</th></tr></thead><tbody>`;
+    html += `<div class="flex flex-wrap items-center justify-between gap-2 mb-2"><h3 class="font-bold">1. MATERIAL FISIK (Ditarik Otomatis)</h3><div class="flex items-center gap-2 no-print"><span id="mf-info" class="text-xs text-gray-500"></span><div class="relative"><i class="fas fa-search absolute left-3 top-2.5 text-gray-400 text-sm"></i><input type="text" id="mf-cari" onkeyup="filterMatFinal()" placeholder="Cari nama material..." class="pl-9 border p-1.5 rounded w-60 text-sm focus:outline-indigo-500"></div></div></div><table class="w-full text-sm border-collapse mb-6"><thead><tr class="bg-gray-100"><th class="p-2 border w-1/2">Nama Material</th><th class="p-2 border">Qty</th><th class="p-2 border">Harga Aktual</th><th class="p-2 border">Total Riil</th><th class="p-2 border text-center no-print">Aksi</th></tr></thead><tbody>`;
     let subMat = 0;
-    activeWorkspaceData.stokMaterialFinal.forEach(m => { let h=parseFloat(m.Harga_Satuan)||0, t=parseFloat(m.Total_Nilai)||0; subMat+=t; html += `<tr class="border-b"><td class="p-2 border">${m.Nama_Material||m.Nama_Item} <span class="text-xs text-gray-400">Tgl: ${(m.Tanggal||'').split('T')[0]}</span></td><td class="p-2 border text-center">${m.Qty_Keluar} ${m.Satuan}</td><td class="p-2 border text-right">Rp ${h.toLocaleString('id-ID')}</td><td class="p-2 border text-right font-bold">Rp ${t.toLocaleString('id-ID')}</td><td class="p-2 border text-center no-print whitespace-nowrap"><button onclick="bukaModalMatFinal(${m.rowIndex})" title="Edit Qty / Harga" class="text-blue-500 mx-1"><i class="fas fa-edit"></i></button><button onclick="hapusMatFinal(${m.rowIndex})" title="Hapus pemakaian ini (barang kembali ke stok)" class="text-red-500 mx-1"><i class="fas fa-trash"></i></button></td></tr>`; });
-    html += `<tr><td colspan="3" class="p-2 border text-right font-bold bg-gray-50">Subtotal Material:</td><td class="p-2 border text-right font-bold bg-gray-50">Rp ${subMat.toLocaleString('id-ID')}</td><td class="no-print"></td></tr></tbody></table>`;
+    activeWorkspaceData.stokMaterialFinal.forEach(m => { let h=parseFloat(m.Harga_Satuan)||0, t=parseFloat(m.Total_Nilai)||0; subMat+=t; html += `<tr class="border-b baris-mat-final" data-nama="${String(m.Nama_Material||m.Nama_Item||'').toLowerCase().replace(/"/g,'&quot;')}" data-total="${t}"><td class="p-2 border">${m.Nama_Material||m.Nama_Item} <span class="text-xs text-gray-400">Tgl: ${(m.Tanggal||'').split('T')[0]}</span></td><td class="p-2 border text-center">${m.Qty_Keluar} ${m.Satuan}</td><td class="p-2 border text-right">Rp ${h.toLocaleString('id-ID')}</td><td class="p-2 border text-right font-bold">Rp ${t.toLocaleString('id-ID')}</td><td class="p-2 border text-center no-print whitespace-nowrap"><button onclick="bukaModalMatFinal(${m.rowIndex})" title="Edit Qty / Harga" class="text-blue-500 mx-1"><i class="fas fa-edit"></i></button><button onclick="hapusMatFinal(${m.rowIndex})" title="Hapus pemakaian ini (barang kembali ke stok)" class="text-red-500 mx-1"><i class="fas fa-trash"></i></button></td></tr>`; });
+    html += `<tr><td colspan="3" class="p-2 border text-right font-bold bg-gray-50">Subtotal Material:</td><td class="p-2 border text-right font-bold bg-gray-50">Rp ${subMat.toLocaleString('id-ID')}</td><td class="no-print"></td></tr><tr id="mf-hasil" class="hidden no-print"><td colspan="3" class="p-2 border text-right text-indigo-700 font-semibold bg-indigo-50">Subtotal hasil pencarian: <span id="mf-hasil-n"></span></td><td class="p-2 border text-right font-bold text-indigo-700 bg-indigo-50" id="mf-hasil-total"></td><td class="no-print"></td></tr><tr id="mf-kosong" class="hidden no-print"><td colspan="5" class="p-3 text-center text-gray-500 italic">Tidak ada material yang cocok.</td></tr></tbody></table>`;
 
     html += `<h3 class="font-bold mb-2 flex justify-between"><span>2. JASA & OPERASIONAL AKTUAL</span> <button onclick="bukaModalJasaOps(false)" class="text-xs bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded shadow no-print"><i class="fas fa-plus"></i> Tambah Data</button></h3><table class="w-full text-sm border-collapse mb-6"><thead><tr class="bg-gray-100"><th class="p-2 border w-1/2">Nama Item</th><th class="p-2 border text-center">Qty</th><th class="p-2 border text-right">Harga</th><th class="p-2 border text-right">Total Riil</th><th class="p-2 border text-center no-print">Aksi</th></tr></thead><tbody>`;
     let subJasa = 0;
@@ -23,6 +23,7 @@ function renderWSFinal() {
 
     const dsr = subMat+subJasa, prm = dsr*0.20;
     document.getElementById('main-content').innerHTML = html + `<tr><td colspan="3" class="p-2 border text-right font-bold bg-gray-50">Subtotal Jasa/Ops:</td><td class="p-2 border text-right font-bold text-orange-600 bg-gray-50">Rp ${subJasa.toLocaleString('id-ID')}</td><td class="p-2 border bg-gray-50 no-print"></td></tr></tbody></table><div class="flex justify-end print-summary"><div class="bg-white p-6 rounded border border-gray-400 shadow-md w-full md:w-1/2"><div class="flex justify-between text-gray-700"><span>TOTAL DASAR:</span> <span class="font-bold">Rp ${dsr.toLocaleString('id-ID')}</span></div><div class="flex justify-between text-indigo-600 mt-2 text-sm"><span>Premi 20%:</span> <span class="font-semibold">Rp ${prm.toLocaleString('id-ID')}</span></div><div class="flex justify-between font-bold text-xl text-indigo-900 border-t-2 border-indigo-900 pt-3 mt-3"><span>REALISASI FINAL:</span> <span>Rp ${(dsr+prm).toLocaleString('id-ID')}</span></div></div></div></div>`;
+    filterMatFinal();
 }
 
 function bukaModalJasaOps(isEdit, rIdx = null) { 
@@ -85,6 +86,16 @@ async function hapusJasaOps(rIdx) {
 
 // ---- Koreksi MATERIAL di RAP Final: mengubah / menghapus transaksi Barang Keluar "Dipakai Project" di Kartu Stok ----
 // Stok, Total Aset, Omset, dan Premi dihitung ulang otomatis dari Kartu Stok.
+// Kotak pencarian material (hanya menyaring tampilan; Subtotal Material dan perhitungan RAP tetap seluruh material).
+function filterMatFinal() {
+    const kw = (document.getElementById('mf-cari').value || '').trim().toLowerCase();
+    const baris = [...document.querySelectorAll('.baris-mat-final')]; let n = 0, total = 0;
+    baris.forEach(tr => { const cocok = !kw || tr.getAttribute('data-nama').indexOf(kw) !== -1; tr.style.display = cocok ? '' : 'none'; if (cocok) { n++; total += parseFloat(tr.getAttribute('data-total')) || 0; } });
+    const info = document.getElementById('mf-info'), hasil = document.getElementById('mf-hasil'), kosong = document.getElementById('mf-kosong');
+    if (info) info.innerText = kw ? `${n} dari ${baris.length} material` : (baris.length ? `${baris.length} material` : '');
+    if (hasil) { hasil.classList.toggle('hidden', !kw || n === 0); document.getElementById('mf-hasil-n').innerText = `${n} item`; document.getElementById('mf-hasil-total').innerText = 'Rp ' + total.toLocaleString('id-ID'); }
+    if (kosong) kosong.classList.toggle('hidden', !(kw && n === 0));
+}
 function cariMatFinal(rIdx) { return activeWorkspaceData.stokMaterialFinal.find(r => r.rowIndex == rIdx); }
 function bukaModalMatFinal(rIdx) {
     const m = cariMatFinal(rIdx); if(!m) return alert('Data tidak ditemukan. Muat ulang menu ini.');
