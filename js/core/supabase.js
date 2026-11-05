@@ -14,6 +14,7 @@ const SB_TABEL = {
     Data_Timeline:      { pk: 'ID_Timeline', kolom: ['ID_Timeline', 'Project_ID', 'Kode_Tahapan', 'Tanggal_Mulai', 'Tanggal_Selesai'], angka: ['Kode_Tahapan'] },
     Data_Kartu_Stok:    { pk: 'Log_ID', kolom: ['Log_ID', 'Tanggal', 'Nama_Material', 'Jenis_Transaksi', 'Kategori_Alokasi', 'Project_ID', 'Qty_Masuk', 'Qty_Keluar', 'Satuan', 'Harga_Satuan', 'Total_Nilai', 'Referensi'], angka: ['Qty_Masuk', 'Qty_Keluar', 'Harga_Satuan', 'Total_Nilai'], urut: 'Urutan' },   // urut: kolom nomor urut pencatatan; hitungan stok bergantung pada urutan ini
     Data_Surat_Jalan:   { pk: 'Surat_Jalan_ID', kolom: ['Surat_Jalan_ID', 'Tanggal', 'Project_ID', 'Brand', 'Nama_Klien', 'Nama_Project', 'Alamat_Project', 'Nama_Supir', 'No_Kendaraan', 'Catatan', 'Ringkasan_Item', 'Items_JSON'] },
+    Data_Aset:          { pk: 'Aset_ID', kolom: ['Aset_ID', 'Nama_Item', 'Kategori', 'Merk', 'Qty', 'Kondisi', 'Tanggal_Beli', 'Nilai_Beli', 'Keterangan'], angka: ['Qty', 'Nilai_Beli'] },
     Master_Operational: { pk: 'Ops_ID', kolom: ['Ops_ID', 'Kategori', 'Nama_Operasional', 'Satuan', 'Biaya_Estimasi', 'Keterangan_Area'], angka: ['Biaya_Estimasi'] }
 };
 // rowIndex = nomor tetap per primary key selama halaman dibuka (bukan urutan baris). Jadi bila ada pembacaan ulang atau
