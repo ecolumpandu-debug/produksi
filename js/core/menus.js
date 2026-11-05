@@ -11,6 +11,7 @@ const MENUS = {
     Stok_Masuk:         { files: ['stok'], open: () => renderStokMasuk() },
     Stok_Keluar:        { files: ['stok'], open: () => renderStokKeluar() },
     Stok_Data:          { files: ['stok'], open: () => renderStokData() },
+    Aset_Data:          { files: ['aset'], open: () => renderAset() },
     Project:            { files: ['project'], open: () => loadProjectData() },
     Timeline:           { files: ['timeline'], open: () => renderMenuTimeline() },
     RAP_Awal:           { files: ['rap-common', 'rap-awal'], open: () => renderMenuRAP('RAP_Awal') },
