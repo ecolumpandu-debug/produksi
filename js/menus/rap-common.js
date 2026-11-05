@@ -8,8 +8,16 @@ let activeWorkspaceData = null;
 
 async function renderMenuRAP(jenisMenu) {
     showLoading("Memuat Daftar Project...");
-    const res = await apiGet('getSheetData', '&sheetName=Data_Project');
+    // Nilai RAP per project untuk daftar: RAP Awal/Belanja = total RAP Awal + premi; RAP Final = total RAP Final + premi (sama dengan kolom di Daftar Project).
+    const pakaiFinal = jenisMenu === 'RAP_Final';
+    const [res, resNilai] = await Promise.all([apiGet('getSheetData', '&sheetName=Data_Project'), pakaiFinal ? apiGet('getDashboardData') : apiGet('getSheetData', '&sheetName=Data_RAP_Awal')]);
     hideLoading();
+    const nilaiRap = {};
+    if(resNilai && resNilai.success) {
+        if(pakaiFinal) resNilai.data.forEach(r => { nilaiRap[r.Project_ID] = parseFloat(r.Total_Final) || 0; });
+        else { const prm = (typeof PREMI_RAP === 'number' ? PREMI_RAP : 0.20); resNilai.data.forEach(r => { nilaiRap[r.Project_ID] = (nilaiRap[r.Project_ID] || 0) + (parseFloat(r.Total_Harga) || 0); }); Object.keys(nilaiRap).forEach(k => { nilaiRap[k] = nilaiRap[k] * (1 + prm); }); }
+    }
+    const tampilNilai = pid => resNilai && resNilai.success ? 'Rp ' + Math.round(nilaiRap[pid] || 0).toLocaleString('id-ID') : '-';
     if(res.success) {
         currentProjectData = res.data;
         let judul = jenisMenu.replace('_', ' ');
@@ -17,7 +25,7 @@ async function renderMenuRAP(jenisMenu) {
         let html = `<div class="bg-white rounded p-4 mb-4 shadow border-t-4 border-indigo-600"><div class="flex flex-wrap gap-2 justify-between items-center mb-3"><h2 class="text-xl font-bold text-gray-800">Pilih Project untuk ${judul} <span class="text-sm font-normal text-gray-400">(<span id="jml-rap">${res.data.length}</span> project)</span></h2><div class="relative"><i class="fas fa-search absolute left-3 top-2.5 text-gray-400"></i><input type="text" id="cari-rap" onkeyup="filterRapProject()" placeholder="Cari klien / project..." class="pl-10 border p-2 rounded w-64 text-sm focus:outline-indigo-500"></div></div><div id="grid-rap-project" class="border rounded divide-y overflow-hidden">`;
         res.data.forEach(p => {
             const st = p.Status || '';
-            html += `<div class="card-rap flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-indigo-50" onclick="bukaWorkspaceRAP('${jenisMenu}', '${p.Project_ID}')" title="Buka ${judul}" data-nama="${(p.Nama_Project||'').toLowerCase()}" data-klien="${(p.Nama_PIC_Klien||'').toLowerCase()}"><i class="fas fa-user-tag text-indigo-400 w-5 text-center"></i><div class="min-w-0 flex-1"><span class="font-bold text-indigo-900">${p.Nama_PIC_Klien||'-'}</span><span class="text-gray-400 mx-2">&middot;</span><span class="text-sm text-gray-600">${p.Nama_Project||''}</span></div>${st ? `<span class="hidden sm:inline text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${warna[st]||'bg-gray-100 text-gray-600'}">${st}</span>` : ''}<i class="fas fa-chevron-right text-gray-300 text-xs"></i></div>`;
+            html += `<div class="card-rap flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-indigo-50" onclick="bukaWorkspaceRAP('${jenisMenu}', '${p.Project_ID}')" title="Buka ${judul}" data-nama="${(p.Nama_Project||'').toLowerCase()}" data-klien="${(p.Nama_PIC_Klien||'').toLowerCase()}"><i class="fas fa-user-tag text-indigo-400 w-5 text-center"></i><div class="min-w-0 flex-1"><span class="font-bold text-indigo-900">${p.Nama_PIC_Klien||'-'}</span><span class="text-gray-400 mx-2">&middot;</span><span class="text-sm text-gray-600">${p.Nama_Project||''}</span></div><span class="nilai-rap text-sm font-semibold text-gray-700 whitespace-nowrap" title="Nilai ${judul} (sudah termasuk premi)">${tampilNilai(p.Project_ID)}</span>${st ? `<span class="hidden sm:inline text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${warna[st]||'bg-gray-100 text-gray-600'}">${st}</span>` : ''}<i class="fas fa-chevron-right text-gray-300 text-xs"></i></div>`;
         });
         document.getElementById('main-content').innerHTML = html + `</div><div id="rap-kosong" class="hidden p-4 text-center text-gray-400 italic text-sm">Tidak ada project yang cocok.</div></div>`;
     } else alert("Gagal muat Project!");
