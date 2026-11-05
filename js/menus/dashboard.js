@@ -13,14 +13,17 @@ async function renderVisualDashboard() {
 function membangunUI_Dashboard(dashData, gudangData) {
     const rp = n => 'Rp ' + Math.round(n || 0).toLocaleString('id-ID');
     const persenPremi = (typeof PREMI_RAP === 'number' ? PREMI_RAP : 0.20);
-    let totalProject = 0, totalOmset = 0, totalPremi = 0, chartLabels = [], chartDataAwal = [], chartDataFinal = [];
+    let totalProject = 0, omsetProforma = 0, omsetFinal = 0, totalPremi = 0, chartLabels = [], chartDataAwal = [], chartDataFinal = [];
     let statusCount = { 'Draft': 0, 'Perencanaan': 0, 'Sedang Berjalan': 0, 'Selesai': 0, 'Batal': 0 };
 
     dashData.forEach(p => {
         const final = parseFloat(p.Total_Final) || 0;                 // RAP Final sudah termasuk premi
         totalProject++;                                               // semua status project
-        totalOmset += final;                                          // omset = total RAP Final (dasar + premi)
-        totalPremi += final - final / (1 + persenPremi);              // premi = bagian premi dari RAP Final
+        const awal = parseFloat(p.Total_Awal) || 0, premiAwal = awal - awal / (1 + persenPremi), premiFinal = final - final / (1 + persenPremi);
+        omsetProforma += awal;                                        // omset proforma = RAP Awal + premi
+        omsetFinal += final;                                          // omset final = RAP Final + premi
+        // premi = premi awal + selisih premi RAP Final; project yang belum punya RAP Final (selisih 0) tetap memakai premi awal
+        totalPremi += final > 0 ? premiAwal + (premiFinal - premiAwal) : premiAwal;
         if(statusCount[p.Status] !== undefined) statusCount[p.Status]++;
         if(chartLabels.length < 5 && (p.Status === 'Sedang Berjalan' || p.Status === 'Selesai')) {
             let namaKlien = p.Nama_PIC_Klien ? p.Nama_PIC_Klien.substring(0, 18) : (p.Nama_Project || p.Project_ID);
@@ -37,10 +40,11 @@ function membangunUI_Dashboard(dashData, gudangData) {
 
     const kartu = (judul, nilai, ikon, warna, ket) => `<div class="bg-white rounded-lg shadow p-5 border-l-4 border-${warna}-500 flex items-center justify-between"><div class="min-w-0"><p class="text-sm text-gray-500 font-semibold mb-1">${judul}</p><p class="text-xl font-bold text-gray-800 break-words">${nilai}</p>${ket ? `<p class="text-xs text-gray-400 mt-1">${ket}</p>` : ''}</div><div class="text-${warna}-200 text-4xl ml-2"><i class="fas ${ikon}"></i></div></div>`;
     let html = `
-    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4 mb-8">
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-8">
         ${kartu('Total Project', totalProject, 'fa-hammer', 'blue', 'Semua status project')}
-        ${kartu('Omset', rp(totalOmset), 'fa-wallet', 'green', 'Total RAP Final + premi')}
-        ${kartu('Total Premi', rp(totalPremi), 'fa-percent', 'amber', 'Premi ' + Math.round(persenPremi * 100) + '% dari semua RAP Final')}
+        ${kartu('Omset Proforma', rp(omsetProforma), 'fa-file-invoice-dollar', 'sky', 'Total RAP Awal + premi')}
+        ${kartu('Omset Final', rp(omsetFinal), 'fa-wallet', 'green', 'Total RAP Final + premi')}
+        ${kartu('Total Premi', rp(totalPremi), 'fa-percent', 'amber', 'Premi awal + selisih premi RAP Final')}
         ${kartu('Total Aset Stok', rp(totalAset), 'fa-warehouse', 'teal', 'Nilai stok umum + alokasi')}
         ${kartu('Macam Barang', macamBarang, 'fa-boxes', 'indigo', 'Material yang ada di stok')}
     </div>
