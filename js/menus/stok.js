@@ -398,30 +398,109 @@ function renderRekapAlokasi() {
 // Halaman detail satu alokasi (Stok Umum / satu project): daftar barang yang masuk + sisa stok, dengan pencarian material. Tombol Cetak -> "Simpan sebagai PDF".
 // Pencarian material di halaman detail alokasi (hanya menyaring tampilan; baris TOTAL tetap seluruh alokasi).
 function filterDetailRekap() {
-    const kw = (document.getElementById('rekap-cari').value || '').trim().toLowerCase(), baris = [...document.querySelectorAll('.baris-rekap')]; let n = 0, m = 0, sisa = 0;
-    baris.forEach(tr => { const cocok = !kw || tr.getAttribute('data-nama').indexOf(kw) !== -1; tr.style.display = cocok ? '' : 'none'; if (cocok) { n++; m += parseFloat(tr.getAttribute('data-masuk')) || 0; sisa += parseFloat(tr.getAttribute('data-sisa')) || 0; } });
-    document.getElementById('rekap-info').innerText = kw ? `${n} dari ${baris.length} barang` : `${baris.length} barang`;
+    const kw = (document.getElementById('rekap-cari').value || '').trim().toLowerCase(), baris = [...document.querySelectorAll('.baris-rekap')]; let n = 0, m = 0, sisa = 0, tersembunyi = 0;
+    baris.forEach((tr, i) => {
+        const nol = !(parseFloat(tr.getAttribute('data-stok')) > 0.00005);
+        const cocok = kw ? tr.getAttribute('data-nama').indexOf(kw) !== -1 : !(_rekapSembunyi && nol);   // pencarian selalu menemukan barang, termasuk yang stoknya 0
+        if (!cocok && !kw && nol) tersembunyi++;
+        tr.style.display = cocok ? '' : 'none'; const sub = document.getElementById('trx-baris-' + i); if (sub) sub.style.display = cocok ? '' : 'none';
+        if (cocok) { n++; m += parseFloat(tr.getAttribute('data-masuk')) || 0; sisa += parseFloat(tr.getAttribute('data-sisa')) || 0; }
+    });
+    document.getElementById('rekap-info').innerText = (kw || tersembunyi) ? `${n} dari ${baris.length} barang` : `${baris.length} barang`;
     document.getElementById('rekap-hasil').classList.toggle('hidden', !kw || n === 0);
     document.getElementById('rekap-hasil-n').innerText = `${n} barang`; document.getElementById('rekap-hasil-masuk').innerText = rpStok(m); document.getElementById('rekap-hasil-sisa').innerText = rpStok(sisa);
     document.getElementById('rekap-kosong').classList.toggle('hidden', !(kw && n === 0));
+    document.getElementById('rekap-catatan').innerText = tersembunyi ? `${tersembunyi} barang dengan stok 0 disembunyikan (nilainya tetap dihitung di baris TOTAL).` : '';
+}
+// ---- Transaksi per barang di halaman detail alokasi: ubah / hapus baris Kartu Stok ----
+const _KAT_KUNCI_REKAP = 'Pindah Alokasi';   // transaksi pindah selalu berpasangan (keluar + masuk), tidak diubah di sini
+function trxBarangRekap(g, nama) { return gudangLogs.filter(l => String(l.Project_ID || '').trim() === g.pid && String(l.Nama_Material || l.Nama_Item || '') === String(nama)); }
+function tabelTrxRekap(g, i) {
+    const trx = trxBarangRekap(g, i.nama);
+    if (!trx.length) return `<p class="text-sm italic text-gray-500">Tidak ada transaksi.</p>`;
+    let h = `<table class="w-full text-xs"><thead><tr class="text-gray-500 uppercase border-b"><th class="p-1.5 text-left">Tanggal</th><th class="p-1.5 text-left">Jenis</th><th class="p-1.5 text-left">Kategori</th><th class="p-1.5 text-center">Qty</th><th class="p-1.5 text-right">Harga</th><th class="p-1.5 text-right">Nilai</th><th class="p-1.5 text-center">Aksi</th></tr></thead><tbody>`;
+    trx.forEach(l => {
+        const masuk = (parseFloat(l.Qty_Masuk) || 0) > 0, qty = masuk ? parseFloat(l.Qty_Masuk) : parseFloat(l.Qty_Keluar) || 0, kunci = String(l.Kategori_Alokasi || '').indexOf(_KAT_KUNCI_REKAP) === 0;
+        h += `<tr class="border-b"><td class="p-1.5 whitespace-nowrap">${escStok(String(l.Tanggal || '').split('T')[0].split('-').reverse().join('-'))}</td><td class="p-1.5 ${masuk ? 'text-green-600' : 'text-red-500'} font-semibold">${masuk ? 'Masuk' : 'Keluar'}</td><td class="p-1.5">${escStok(l.Kategori_Alokasi || '-')}</td><td class="p-1.5 text-center">${bulatStok(qty)}</td><td class="p-1.5 text-right">${rpStok(parseFloat(l.Harga_Satuan) || 0)}</td><td class="p-1.5 text-right">${rpStok(parseFloat(l.Total_Nilai) || 0)}</td><td class="p-1.5 text-center whitespace-nowrap">${kunci ? `<span class="text-gray-400" title="Transaksi pindah alokasi tidak dapat diubah di sini"><i class="fas fa-lock"></i></span>` : `<button onclick="bukaEditTrxRekap(${l.rowIndex})" title="Edit" class="text-blue-500 mx-1"><i class="fas fa-edit"></i></button><button onclick="hapusTrxRekap(${l.rowIndex})" title="Hapus" class="text-red-500 mx-1"><i class="fas fa-trash"></i></button>`}</td></tr>`;
+    });
+    return h + `</tbody></table>`;
+}
+function toggleTrxRekap(n) {
+    const sub = document.getElementById('trx-baris-' + n), ikon = document.getElementById('trx-ikon-' + n); if (!sub) return;
+    const buka = sub.classList.toggle('hidden') === false; ikon.className = 'fas text-xs ' + (buka ? 'fa-chevron-down' : 'fa-chevron-right');
+}
+function cariTrxRekap(rIdx) { return gudangLogs.find(l => l.rowIndex == rIdx); }
+// Stok yang masih ada untuk satu barang di alokasi yang sedang dibuka (batas pengurangan Qty masuk / penambahan Qty keluar).
+function stokSisaRekap(nama) { const k = gudangKolam.find(x => x.Nama_Item === nama && (x.Kolam === 'Project' ? x.Project_ID === _rekapPid : _rekapPid === '')); return k ? k.Stok : 0; }
+function barisDariTrx(l, qty, harga, tanggal) {
+    const masuk = (parseFloat(l.Qty_Masuk) || 0) > 0, total = Math.round(qty * harga * 100) / 100;
+    return [l.Log_ID, tanggal, l.Nama_Material || l.Nama_Item, l.Jenis_Transaksi, l.Kategori_Alokasi, l.Project_ID, masuk ? qty : 0, masuk ? 0 : qty, l.Satuan, harga, total, l.Referensi];
+}
+function pastikanModalTrxRekap() {
+    if (document.getElementById('modal-trx-rekap')) return;
+    document.body.insertAdjacentHTML('beforeend', `<div id="modal-trx-rekap" class="fixed inset-0 bg-black bg-opacity-50 hidden justify-center items-center z-50 no-print"><div class="bg-white p-6 rounded shadow w-96">
+        <h3 class="font-bold mb-1">Edit Transaksi</h3><p id="tr-info" class="text-sm text-gray-600 mb-3"></p><input type="hidden" id="tr-rowIndex">
+        <label class="text-xs text-gray-500">Tanggal</label><input type="date" id="tr-tanggal" class="w-full border p-2 mb-2">
+        <label class="text-xs text-gray-500">Qty</label><input type="number" step="any" id="tr-qty" class="w-full border p-2 mb-2" oninput="hitungTotalTrxRekap()">
+        <label class="text-xs text-gray-500">Harga satuan (Rp)</label><input type="number" id="tr-harga" class="w-full border p-2 mb-2" oninput="hitungTotalTrxRekap()">
+        <p class="text-xs text-gray-500 mb-3">Total nilai: <b id="tr-total">Rp 0</b></p>
+        <p class="text-xs text-amber-700 mb-4">Perubahan ini mempengaruhi stok, Alokasi Stok di Daftar Project, dan (untuk barang keluar) biaya material RAP Final.</p>
+        <div class="flex justify-end gap-2"><button onclick="closeModal('modal-trx-rekap')" class="bg-gray-400 text-white px-3 py-1 rounded">Batal</button><button onclick="simpanTrxRekap()" class="bg-blue-600 text-white px-4 py-1.5 rounded font-bold shadow">Simpan</button></div></div></div>`);
+}
+function hitungTotalTrxRekap() { document.getElementById('tr-total').innerText = rpStok((parseFloat(document.getElementById('tr-qty').value) || 0) * (parseFloat(document.getElementById('tr-harga').value) || 0)); }
+function bukaEditTrxRekap(rIdx) {
+    const l = cariTrxRekap(rIdx); if (!l) return alert('Transaksi tidak ditemukan. Muat ulang menu ini.');
+    pastikanModalTrxRekap(); const masuk = (parseFloat(l.Qty_Masuk) || 0) > 0;
+    document.getElementById('tr-rowIndex').value = rIdx; document.getElementById('tr-info').innerText = `${l.Nama_Material || l.Nama_Item} · ${masuk ? 'Masuk' : 'Keluar'} · ${l.Kategori_Alokasi || ''}`;
+    document.getElementById('tr-tanggal').value = String(l.Tanggal || '').split('T')[0]; document.getElementById('tr-qty').value = masuk ? parseFloat(l.Qty_Masuk) : parseFloat(l.Qty_Keluar); document.getElementById('tr-harga').value = parseFloat(l.Harga_Satuan) || 0;
+    hitungTotalTrxRekap(); document.getElementById('modal-trx-rekap').style.display = 'flex';
+}
+async function segarkanDetailRekap(notice) {
+    const pid = _rekapPid; await renderStokData(); switchTabStok('rekap');
+    const idx = _rekapSemua.findIndex(g => g.pid === pid); if (idx >= 0) detailRekapAlokasi(idx, notice); else { const a = document.getElementById('area-rekap'); if (a && notice) a.insertAdjacentHTML('afterbegin', `<div class="bg-green-50 border border-green-300 text-green-800 text-sm p-3 rounded mb-3"><i class="fas fa-check-circle mr-2"></i>${escStok(notice)}</div>`); }
+}
+async function simpanTrxRekap() {
+    const rIdx = document.getElementById('tr-rowIndex').value, l = cariTrxRekap(rIdx); if (!l) return alert('Transaksi tidak ditemukan. Muat ulang menu ini.');
+    const qty = Math.round((parseFloat(document.getElementById('tr-qty').value) || 0) * 10000) / 10000, harga = parseFloat(document.getElementById('tr-harga').value), tgl = document.getElementById('tr-tanggal').value;
+    if (qty <= 0) return alert('Qty harus lebih dari 0! Untuk membatalkan transaksi, gunakan tombol hapus.'); if (isNaN(harga) || harga < 0) return alert('Harga tidak valid!'); if (!tgl) return alert('Tanggal wajib diisi!');
+    const masuk = (parseFloat(l.Qty_Masuk) || 0) > 0, lama = masuk ? parseFloat(l.Qty_Masuk) : parseFloat(l.Qty_Keluar) || 0, nama = l.Nama_Material || l.Nama_Item, sisa = stokSisaRekap(nama);
+    if (masuk && lama - qty > sisa + 0.00005) return alert(`Qty masuk tidak bisa dikurangi ${Math.round((lama - qty) * 10000) / 10000}: stok yang tersisa hanya ${bulatStok(sisa)} (sisanya sudah keluar/dipakai). Ubah dulu transaksi keluarnya.`);
+    if (!masuk && qty - lama > sisa + 0.00005) return alert(`Stok tidak cukup. Qty keluar ditambah ${Math.round((qty - lama) * 10000) / 10000}, stok tersisa hanya ${bulatStok(sisa)}.`);
+    showLoading('Memperbarui Transaksi...');
+    const res = await apiUpdateMaster('Data_Kartu_Stok', rIdx, barisDariTrx(l, qty, harga, tgl));
+    if (res.success) { closeModal('modal-trx-rekap'); await segarkanDetailRekap(`Transaksi ${nama} diperbarui.`); } else { hideLoading(); alert(res.message); }
+}
+async function hapusTrxRekap(rIdx) {
+    const l = cariTrxRekap(rIdx); if (!l) return alert('Transaksi tidak ditemukan. Muat ulang menu ini.');
+    const masuk = (parseFloat(l.Qty_Masuk) || 0) > 0, qty = masuk ? parseFloat(l.Qty_Masuk) : parseFloat(l.Qty_Keluar) || 0, nama = l.Nama_Material || l.Nama_Item, sisa = stokSisaRekap(nama);
+    if (masuk && qty > sisa + 0.00005) return alert(`Transaksi masuk ini tidak bisa dihapus: ${bulatStok(qty)} ${l.Satuan || ''} masuk, tetapi stok yang tersisa hanya ${bulatStok(sisa)} (sisanya sudah keluar/dipakai). Hapus atau ubah dulu transaksi keluarnya.`);
+    if (!confirm(`Hapus transaksi ${masuk ? 'MASUK' : 'KELUAR'} ${nama} (${bulatStok(qty)} ${l.Satuan || ''}, ${l.Kategori_Alokasi || ''})?\n\nIni mengubah stok, Alokasi Stok di Daftar Project${masuk ? '' : ', dan biaya material di RAP Final'}.`)) return;
+    showLoading('Menghapus Transaksi...');
+    const res = await apiDeleteMaster('Data_Kartu_Stok', rIdx);
+    if (res.success) await segarkanDetailRekap(`Transaksi ${nama} dihapus.`); else { hideLoading(); alert(res.message); }
 }
 async function kembaliKeRekapStok() { await renderStokData(); switchTabStok('rekap'); }
-function detailRekapAlokasi(idx) {
+let _rekapPid = '', _rekapSembunyi = true;   // alokasi yang sedang dibuka; sembunyikan barang stok 0 (default)
+function detailRekapAlokasi(idx, notice) {
     const g = _rekapSemua[idx]; if (!g) return alert('Data alokasi tidak ditemukan. Muat ulang menu Data Stok.');
+    _rekapPid = g.pid;
     const umum = g.pid === '', p = umum ? null : currentProjectData.find(x => x.Project_ID === g.pid);
     const items = Object.keys(g.item).map(n => g.item[n]);
     let tQtyMasuk = 0; items.forEach(i => { tQtyMasuk += i.qtyMasuk; });
     const info = (l, v) => `<tr><td class="py-0.5 pr-3 text-gray-600 align-top whitespace-nowrap">${l}</td><td class="py-0.5 pr-2 align-top">:</td><td class="py-0.5 font-semibold">${escStok(v) || '-'}</td></tr>`;
-    const baris = items.length === 0 ? `<tr><td colspan="7" class="p-3 border text-center italic text-gray-500">Belum ada barang.</td></tr>` : items.map((i, n) => `<tr class="baris-rekap" data-nama="${escStok(String(i.nama || '').toLowerCase())}" data-masuk="${i.nilaiMasuk}" data-sisa="${i.nilaiStok}"><td class="p-2 border text-center">${n + 1}</td><td class="p-2 border">${escStok(i.nama)}</td><td class="p-2 border text-center">${escStok(i.satuan || '-')}</td><td class="p-2 border text-center">${bulatStok(i.qtyMasuk)}</td><td class="p-2 border text-right">${rpStok(i.nilaiMasuk)}</td><td class="p-2 border text-center">${bulatStok(i.stok)}</td><td class="p-2 border text-right">${rpStok(i.nilaiStok)}</td></tr>`).join('');
+    const baris = items.length === 0 ? `<tr><td colspan="7" class="p-3 border text-center italic text-gray-500">Belum ada barang.</td></tr>` : items.map((i, n) => `<tr class="baris-rekap" data-nama="${escStok(String(i.nama || '').toLowerCase())}" data-masuk="${i.nilaiMasuk}" data-sisa="${i.nilaiStok}" data-stok="${i.stok}"><td class="p-2 border text-center">${n + 1}</td><td class="p-2 border"><button onclick="toggleTrxRekap(${n})" class="no-print text-indigo-500 mr-1" title="Lihat / ubah transaksi barang ini"><i id="trx-ikon-${n}" class="fas fa-chevron-right text-xs"></i></button>${escStok(i.nama)}</td><td class="p-2 border text-center">${escStok(i.satuan || '-')}</td><td class="p-2 border text-center">${bulatStok(i.qtyMasuk)}</td><td class="p-2 border text-right">${rpStok(i.nilaiMasuk)}</td><td class="p-2 border text-center">${bulatStok(i.stok)}</td><td class="p-2 border text-right">${rpStok(i.nilaiStok)}</td></tr><tr class="baris-rekap-trx hidden no-print" id="trx-baris-${n}"><td colspan="7" class="p-3 border bg-gray-50">${tabelTrxRekap(g, i)}</td></tr>`).join('');
     const ttd = j => `<div class="text-center"><p class="font-semibold mb-20">${j}</p><div class="border-t border-gray-800 pt-2 text-left"><p>Nama : ..............................</p></div></div>`;
     document.getElementById('main-content').innerHTML = `<div class="flex justify-between items-center mb-4 no-print"><button onclick="kembaliKeRekapStok()" class="bg-gray-500 text-white px-4 py-2 rounded"><i class="fas fa-arrow-left mr-2"></i>Kembali</button><button onclick="window.print()" class="bg-green-600 text-white px-4 py-2 rounded"><i class="fas fa-print mr-2"></i>Cetak / Simpan PDF</button></div>
-    <div class="flex flex-wrap items-center justify-between gap-2 mb-3 no-print"><span id="rekap-info" class="text-sm text-gray-500">${items.length} barang</span><div class="relative"><i class="fas fa-search absolute left-3 top-2.5 text-gray-400 text-sm"></i><input type="text" id="rekap-cari" onkeyup="filterDetailRekap()" placeholder="Cari material di alokasi ini..." class="pl-9 border p-1.5 rounded w-64 text-sm focus:outline-indigo-500"></div></div>
+    ${notice ? `<div class="bg-green-50 border border-green-300 text-green-800 text-sm p-3 rounded mb-3 no-print"><i class="fas fa-check-circle mr-2"></i>${escStok(notice)}</div>` : ''}
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-3 no-print"><span id="rekap-info" class="text-sm text-gray-500">${items.length} barang</span><label class="text-sm text-gray-600 flex items-center gap-2 cursor-pointer"><input type="checkbox" id="rekap-sembunyi" onchange="_rekapSembunyi = this.checked; filterDetailRekap()" ${_rekapSembunyi ? 'checked' : ''}> Sembunyikan barang stok 0</label><div class="relative"><i class="fas fa-search absolute left-3 top-2.5 text-gray-400 text-sm"></i><input type="text" id="rekap-cari" onkeyup="filterDetailRekap()" placeholder="Cari material di alokasi ini..." class="pl-9 border p-1.5 rounded w-64 text-sm focus:outline-indigo-500"></div></div>
     <div class="print-area bg-white p-8 rounded-lg shadow-lg">
         <div class="text-center mb-6"><h2 class="text-2xl font-bold uppercase tracking-wide">Rekap Alokasi Stok</h2><p class="text-sm text-gray-600 mt-1">${umum ? 'Stok Umum' : 'Alokasi Project'}</p></div>
         <div class="grid grid-cols-2 gap-6 text-sm mb-6"><table><tbody>${umum ? info('Alokasi', 'Stok Umum (dipakai semua project)') : info('Klien', p ? p.Nama_PIC_Klien : '') + info('Project', p ? p.Nama_Project : g.pid) + info('ID Project', g.pid) + info('Alamat', p ? p.Alamat_Project : '')}</tbody></table><table><tbody>${info('Tanggal Cetak', tglLokalStok().split('-').reverse().join('-'))}${info('Jumlah Barang', String(items.length))}</tbody></table></div>
         <table class="w-full text-sm border-collapse mb-4"><thead><tr class="bg-gray-100"><th class="p-2 border w-10">No</th><th class="p-2 border text-left">Nama Barang</th><th class="p-2 border">Satuan</th><th class="p-2 border">Qty Masuk</th><th class="p-2 border text-right">Nilai Masuk</th><th class="p-2 border">Sisa Stok</th><th class="p-2 border text-right">Nilai Sisa</th></tr></thead><tbody>${baris}</tbody>
         <tfoot><tr id="rekap-hasil" class="hidden no-print bg-indigo-50 text-indigo-700 font-semibold"><td colspan="4" class="p-2 border text-right">Subtotal hasil pencarian (<span id="rekap-hasil-n"></span>)</td><td class="p-2 border text-right" id="rekap-hasil-masuk"></td><td class="p-2 border"></td><td class="p-2 border text-right" id="rekap-hasil-sisa"></td></tr><tr id="rekap-kosong" class="hidden no-print"><td colspan="7" class="p-3 border text-center italic text-gray-500">Tidak ada material yang cocok.</td></tr><tr class="bg-gray-50 font-bold"><td colspan="3" class="p-2 border text-right">TOTAL</td><td class="p-2 border text-center">${bulatStok(tQtyMasuk)}</td><td class="p-2 border text-right rekap-cetak-masuk">${rpStok(g.masuk)}</td><td class="p-2 border"></td><td class="p-2 border text-right rekap-cetak-sisa">${rpStok(g.sisa)}</td></tr></tfoot></table>
+        <p id="rekap-catatan" class="text-xs text-amber-700 mb-2"></p>
         <p class="text-xs text-gray-500 mb-2">Nilai Masuk = total pembelian yang dialokasikan${umum ? ' ke stok umum' : ' ke project ini'}. Sisa Stok = yang masih ada di gudang saat dicetak.</p>
         <div class="mt-10 grid grid-cols-2 gap-8 text-sm" style="break-inside:avoid;page-break-inside:avoid">${ttd('Dibuat oleh')}${ttd('Mengetahui')}</div>
     </div>`;
+    filterDetailRekap();
 }
