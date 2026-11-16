@@ -9,7 +9,7 @@ let gudangStock = [], gudangLogs = [], gudangKolam = [];
 let currentPageStok = 1, stokCari = '', stokKolam = 'semua', stokAksi = null;
 
 const ALOKASI_STOK = {
-    Masuk:  [['Pembelian Umum', 'Stok Umum'], ['Pembelian Project', 'Untuk Project']],
+    Masuk:  [['Pembelian Project', 'Untuk Project'], ['Pembelian Umum', 'Stok Umum']],
     Keluar: [['Dipakai Project (RAP Final)', 'Dipakai Project'], ['Penyesuaian (Keluar)', 'Penyesuaian Hilang/Rusak']]
 };
 
