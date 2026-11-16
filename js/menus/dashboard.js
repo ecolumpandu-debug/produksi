@@ -25,7 +25,7 @@ function membangunUI_Dashboard(dashData, gudangData, asetData) {
         // premi = premi awal + selisih premi RAP Final; project yang belum punya RAP Final (selisih 0) tetap memakai premi awal
         totalPremi += final > 0 ? premiAwal + (premiFinal - premiAwal) : premiAwal;
         if(statusCount[p.Status] !== undefined) statusCount[p.Status]++;
-        if(chartLabels.length < 5 && (p.Status === 'Sedang Berjalan' || p.Status === 'Selesai')) {
+        if(chartLabels.length < 5 && p.Status === 'Sedang Berjalan') {   // grafik hanya project yang sedang berjalan
             let namaKlien = p.Nama_PIC_Klien ? p.Nama_PIC_Klien.substring(0, 18) : (p.Nama_Project || p.Project_ID);
             chartLabels.push(namaKlien + (p.Nama_PIC_Klien && p.Nama_PIC_Klien.length > 18 ? '...' : ''));
             chartDataAwal.push(parseFloat(p.Total_Awal) || 0); chartDataFinal.push(final);
