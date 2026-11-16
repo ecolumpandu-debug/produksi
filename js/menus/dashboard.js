@@ -4,13 +4,13 @@
 // =========================================================================
 async function renderVisualDashboard() {
     showLoading("Menganalisis Data Dashboard...");
-    const [dashRes, gudangRes] = await Promise.all([ apiGet('getDashboardData'), apiGet('getGudangData') ]);
+    const [dashRes, gudangRes, asetRes] = await Promise.all([ apiGet('getDashboardData'), apiGet('getGudangData'), apiGet('getSheetData', '&sheetName=Data_Aset') ]);
     hideLoading();
-    if(dashRes.success && gudangRes.success) membangunUI_Dashboard(dashRes.data, gudangRes.data);
+    if(dashRes.success && gudangRes.success) membangunUI_Dashboard(dashRes.data, gudangRes.data, asetRes && asetRes.success ? asetRes.data : null);
     else alert("Gagal memuat data Dashboard!");
 }
 
-function membangunUI_Dashboard(dashData, gudangData) {
+function membangunUI_Dashboard(dashData, gudangData, asetData) {
     const rp = n => 'Rp ' + Math.round(n || 0).toLocaleString('id-ID');
     const persenPremi = (typeof PREMI_RAP === 'number' ? PREMI_RAP : 0.20);
     let totalProject = 0, omsetProforma = 0, omsetFinal = 0, totalPremi = 0, chartLabels = [], chartDataAwal = [], chartDataFinal = [];
@@ -32,11 +32,12 @@ function membangunUI_Dashboard(dashData, gudangData) {
         }
     });
 
-    // Stok: total aset = jumlah nilai semua kolam (umum + alokasi); macam barang = jumlah nama material yang stoknya masih ada.
+    // Stok: total aset = jumlah nilai semua kolam (umum + alokasi).
     const kolam = gudangData.kolam || [];
     const totalAset = kolam.reduce((t, k) => t + (parseFloat(k.Nilai) || 0), 0);
-    const stokPerItem = {}; kolam.forEach(k => { stokPerItem[k.Nama_Item] = (stokPerItem[k.Nama_Item] || 0) + (parseFloat(k.Stok) || 0); });
-    const macamBarang = Object.keys(stokPerItem).filter(n => stokPerItem[n] > 0).length;
+    // Nilai Data Aset (alat produksi, kendaraan, dll): hanya status Normal, nilai = Qty x Nilai Beli per unit. null bila tabel belum bisa dimuat.
+    const asetNormal = Array.isArray(asetData) ? asetData.filter(a => a.Kondisi === 'Normal') : null;
+    const nilaiAset = asetNormal ? asetNormal.reduce((t, a) => t + (parseFloat(a.Qty) || 0) * (parseFloat(a.Nilai_Beli) || 0), 0) : null;
 
     const kartu = (judul, nilai, ikon, warna, ket) => `<div class="bg-white rounded-lg shadow p-5 border-l-4 border-${warna}-500 flex items-center justify-between"><div class="min-w-0"><p class="text-sm text-gray-500 font-semibold mb-1">${judul}</p><p class="text-xl font-bold text-gray-800 break-words">${nilai}</p>${ket ? `<p class="text-xs text-gray-400 mt-1">${ket}</p>` : ''}</div><div class="text-${warna}-200 text-4xl ml-2"><i class="fas ${ikon}"></i></div></div>`;
     let html = `
@@ -46,7 +47,7 @@ function membangunUI_Dashboard(dashData, gudangData) {
         ${kartu('Omset Final', rp(omsetFinal), 'fa-wallet', 'green', 'Total RAP Final + premi')}
         ${kartu('Total Premi', rp(totalPremi), 'fa-percent', 'amber', 'Premi awal + selisih premi RAP Final')}
         ${kartu('Total Aset Stok', rp(totalAset), 'fa-warehouse', 'teal', 'Nilai stok umum + alokasi')}
-        ${kartu('Macam Barang', macamBarang, 'fa-boxes', 'indigo', 'Material yang ada di stok')}
+        ${kartu('Nilai Data Aset', nilaiAset === null ? '-' : rp(nilaiAset), 'fa-tools', 'indigo', nilaiAset === null ? 'Data Aset belum bisa dimuat' : `Alat produksi dll, status Normal \u00b7 ${asetNormal.length} baris`)}
     </div>
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <div class="md:col-span-2 bg-white rounded-lg shadow p-5"><h3 class="text-lg font-bold text-gray-700 mb-4 border-b pb-2">Kesehatan Anggaran Project</h3><div class="relative h-64 w-full"><canvas id="chart-anggaran"></canvas></div></div>
