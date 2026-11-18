@@ -110,13 +110,14 @@ function onChangeAlokasiStok() {
 // Info stok di bawah kolom material, sesuai jenis transaksi, alokasi, dan project yang dipilih.
 // Rincian stok yang bisa dikeluarkan untuk pilihan saat ini (Barang Keluar). Null untuk Barang Masuk.
 function alokasiBelumPilihProject() { return document.getElementById('s-jenis').value === 'Keluar' && document.getElementById('s-alokasi').value.startsWith('Dipakai Project') && !document.getElementById('s-project-id').value; }
+function namaKlienStok(pid) { const p = currentProjectData.find(x => x.Project_ID === pid); return (p && p.Nama_PIC_Klien) || pid; }
 function rincianStokKeluar(nama) {
     const jenis = document.getElementById('s-jenis').value; if (jenis !== 'Keluar') return null;
     const alok = document.getElementById('s-alokasi').value, pid = document.getElementById('s-project-id').value;
     const u = Math.max(0, bulatStok(stokUmum(nama)));
     if (alok.startsWith('Dipakai Project')) {
-        if (!pid) return { teks: `Umum ${u}`, total: u, perinci: `Umum ${u}` };
-        const a = Math.max(0, bulatStok(stokAlokasi(nama, pid))); return { teks: `Alokasi ${a} \u00b7 Umum ${u}`, total: bulatStok(a + u), perinci: `alokasi project ${a} + umum ${u}` };
+        if (!pid) return { teks: `Umum ${u}`, total: u, perinci: `umum ${u}; alokasi hanya bisa dipakai oleh klien pemiliknya` };
+        const a = Math.max(0, bulatStok(stokAlokasi(nama, pid))); const kl = namaKlienStok(pid); return { teks: `Alokasi ${kl} ${a} \u00b7 Umum ${u}`, total: bulatStok(a + u), perinci: `alokasi ${kl} ${a} + umum ${u}` };
     }
     return { teks: `Umum ${u}`, total: u, perinci: `umum ${u}` };
 }
