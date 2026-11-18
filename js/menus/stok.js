@@ -1,567 +1,86 @@
 // =========================================================================
-// MENU MANAJEMEN STOK  (3 submenu: Barang Masuk, Barang Keluar, Data Stok)
-// API: getSheetData(Data_Project), getGudangData, saveMasterData(Data_Kartu_Stok).
-// Barang Masuk / Keluar: form langsung di halaman (bukan pop-up). Setiap simpan masuk ke
-// Data_Kartu_Stok, lalu otomatis muncul di Data Stok (stok aktual + riwayat).
+// MENU RAP BELANJA
+// Hanya membaca data dari getWorkspaceData. Memakai rap-common.js.
+// Kolom: Material, Supplier, Stok, Kebutuhan, QTY (yang harus dibeli), Satuan, Harga, Total, Keterangan.
+// Stok = alokasi project ini + stok umum (alokasi project lain tidak ikut). Stok umum yang juga dibutuhkan
+// project lain diberi catatan "dipakai bersama" (tidak dikunci).
+// Dikelompokkan per supplier (A-Z) dengan subtotal; di bawah ada total belanja dan kotak approval.
+// Filter status stok: Semua / Harus dibeli (kosong + kurang) / Stok kosong / Stok cukup. Di tiap supplier,
+// urutan: stok kosong, stok kurang, lalu stok cukup. Subtotal dan total belanja mengikuti isi yang tampil.
 // =========================================================================
-// state milik menu ini
-let gudangStock = [], gudangLogs = [], gudangKolam = [];
-let currentPageStok = 1, stokCari = '', stokKolam = 'semua', stokAksi = null;
-
-const ALOKASI_STOK = {
-    Masuk:  [['Pembelian Project', 'Untuk Project'], ['Pembelian Umum', 'Stok Umum']],
-    Keluar: [['Dipakai Project (RAP Final)', 'Dipakai Project'], ['Penyesuaian (Keluar)', 'Penyesuaian Hilang/Rusak']]
-};
-
-function escStok(v) {
-    return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-function tglLokalStok() { return new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0]; }
-function bulatStok(n) { return Math.round(n * 100) / 100; }
-const rpStok = n => 'Rp ' + Math.round(n || 0).toLocaleString('id-ID');
-
-// ---- Kolam stok: Stok Umum (dipakai semua project) dan Stok Alokasi (khusus satu project) ----
-function stokUmum(nama) { const k = gudangKolam.find(x => x.Nama_Item === nama && x.Kolam === 'Umum'); return k ? k.Stok : 0; }
-function stokAlokasi(nama, pid) { const k = gudangKolam.find(x => x.Nama_Item === nama && x.Kolam === 'Project' && x.Project_ID === pid); return k ? k.Stok : 0; }
-function stokAlokasiSemua(nama) { return gudangKolam.filter(x => x.Nama_Item === nama && x.Kolam === 'Project').reduce((t, k) => t + k.Stok, 0); }
-// Yang boleh dipakai project: alokasi miliknya + stok umum.
-function stokUntukProject(nama, pid) { return Math.max(0, stokAlokasi(nama, pid) + stokUmum(nama)); }
-function labelProjectStok(pid) { const p = currentProjectData.find(x => x.Project_ID === pid); return p ? `${p.Nama_PIC_Klien || '-'} - ${p.Nama_Project}` : pid; }
-
-// Memuat data project (untuk pilihan klien) dan data gudang (stok + riwayat). Mengembalikan true bila berhasil.
-async function muatDataStok() {
-    showLoading("Memuat Gudang...");
-    const [pDataRes, gDataRes] = await Promise.all([ apiGet('getSheetData', '&sheetName=Data_Project'), apiGet('getGudangData') ]);
-    hideLoading();
-    if (!(pDataRes.success && gDataRes.success)) { alert("Gagal memuat Data Gudang!"); return false; }
-    if (!gDataRes.data.kolam) { alert("Apps Script belum diperbarui. Deploy 'Versi baru' Code.gs terbaru, lalu muat ulang halaman."); return false; }
-    currentProjectData = pDataRes.data; gudangStock = gDataRes.data.currentStock; gudangLogs = gDataRes.data.logs; gudangKolam = gDataRes.data.kolam;
-    return true;
+let rbFilter = 'semua', rbProyek = null;
+const FILTER_BELANJA = { semua: 'Semua material', beli: 'Harus dibeli (kosong + kurang)', kosong: 'Stok kosong', cukup: 'Stok cukup', belum: 'Belum dibeli', sebagian: 'Sebagian dibeli', sudah: 'Sudah dibeli' };
+// Status belanja (tracking Purchasing) dihitung otomatis dari Barang Masuk 'Untuk Project' milik project ini:
+// dibeli = total Qty masuk material itu; perlu = kebutuhan - stok sebelum dibeli (stok sekarang - dibeli + yang sudah dipakai di RAP Final).
+function statusBelanjaRap(butuh, stok, dibeli, dipakai) {
+    const perlu = Math.max(0, Math.round((butuh - (stok - dibeli + dipakai)) * 100) / 100);
+    if (dibeli <= 0) return { kode: perlu > 0 ? 'belum' : 'tidak', perlu, dibeli };
+    return { kode: dibeli >= perlu ? 'sudah' : 'sebagian', perlu, dibeli };
 }
 
-// ------------------------- BARANG MASUK / BARANG KELUAR (form) -------------------------
-async function renderStokMasuk(notice) { await tampilFormStok('Masuk', notice); }
-async function renderStokKeluar(notice) { await tampilFormStok('Keluar', notice); }
-
-async function tampilFormStok(jenis, notice) {
-    if (!(await muatDataStok())) return;
-    const masuk = jenis === 'Masuk';
-    document.getElementById('header-title').innerText = 'Manajemen Stok';
-    const warna = masuk ? 'green' : 'red';
-    const opsi = ALOKASI_STOK[jenis].map(([v, t]) => `<option value="${escStok(v)}">${escStok(t)}</option>`).join('');
-    const terakhir = gudangLogs.filter(l => parseFloat(masuk ? l.Qty_Masuk : l.Qty_Keluar) > 0).slice(0, 10);
-    let riwayat = terakhir.map(l => `<tr class="border-b"><td class="p-2 text-gray-500">${escStok((l.Tanggal || '').split('T')[0])}</td><td class="p-2 font-medium">${escStok(l.Nama_Material || l.Nama_Item)}</td><td class="p-2 text-center font-bold text-${warna}-600">${escStok(masuk ? l.Qty_Masuk : l.Qty_Keluar)} ${escStok(l.Satuan)}</td><td class="p-2 text-xs text-gray-500">${escStok(l.Kategori_Alokasi)} - ${escStok(l.Project_ID !== '' ? l.Project_ID : (l.Referensi || '-'))}</td></tr>`).join('');
-    if (!riwayat) riwayat = `<tr><td colspan="4" class="p-4 text-center italic text-gray-500">Belum ada transaksi.</td></tr>`;
-
-    document.getElementById('main-content').innerHTML = `
-    <div class="bg-white rounded-lg shadow p-6 mb-6 border-t-4 border-${warna}-600">
-        <h2 class="text-xl font-bold text-gray-800 mb-1"><i class="fas fa-arrow-circle-${masuk ? 'down' : 'up'} text-${warna}-600 mr-2"></i>Barang ${masuk ? 'Masuk' : 'Keluar'}</h2>
-        <p class="text-sm text-gray-500 mb-4">${masuk ? 'Catat barang yang diterima ke gudang. Stok bertambah otomatis.' : 'Catat barang yang dikeluarkan dari gudang. Stok berkurang otomatis dan tidak boleh melebihi stok yang ada.'}</p>
-        ${notice ? `<div class="bg-green-50 border border-green-300 text-green-800 text-sm p-3 rounded mb-4"><i class="fas fa-check-circle mr-2"></i>${escStok(notice)}</div>` : ''}
-        <input type="hidden" id="s-jenis" value="${jenis}">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <div><label class="block text-sm text-gray-600 mb-1">Tanggal</label><input type="date" id="s-tanggal" value="${tglLokalStok()}" class="w-full border p-2 rounded focus:outline-indigo-500"></div>
-            <div><label class="block text-sm text-gray-600 mb-1">Label Alokasi / Keterangan</label><select id="s-alokasi" class="w-full border p-2 rounded bg-white focus:outline-indigo-500" onchange="onChangeAlokasiStok()">${opsi}</select><div id="s-hint-alokasi" class="text-xs text-gray-500 mt-1"></div></div>
-        </div>
-        <div class="mb-4 relative hidden" id="wrap-stok-project">
-            <label class="block text-sm mb-1 text-indigo-700 font-bold"><i class="fas fa-user-tag mr-1"></i> Cari Klien (Peruntukan)</label>
-            <input type="text" id="s-project-search" onkeyup="liveSearchProjectStok()" class="w-full border p-2 rounded border-indigo-300 bg-indigo-50 focus:outline-indigo-500" placeholder="Ketik Nama Klien..." autocomplete="off">
-            <input type="hidden" id="s-project-id">
-            <ul id="s-search-project" class="absolute z-50 w-full bg-white border border-gray-200 shadow-xl rounded max-h-40 overflow-y-auto hidden"></ul>
-        </div>
-        <div class="mb-4 relative">
-            <label class="block text-sm text-gray-600 mb-1">Cari Nama Material</label>
-            <input type="text" id="s-nama" onkeyup="liveSearchMaterialStok()" class="w-full border p-2 rounded focus:outline-indigo-500" placeholder="Ketik material..." autocomplete="off">
-            <ul id="s-search-material" class="absolute z-50 w-full bg-white border border-gray-200 shadow-xl rounded max-h-40 overflow-y-auto hidden"></ul>
-            <div id="s-info-stok" class="text-xs text-gray-500 mt-1 min-h-[1rem]"></div>
-        </div>
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-            <div><label class="block text-sm text-gray-600 mb-1">Qty</label><input type="number" id="s-qty" class="w-full border p-2 rounded focus:outline-indigo-500" placeholder="0"></div>
-            <div><label class="block text-sm text-gray-600 mb-1">Satuan</label><input type="text" id="s-satuan" class="w-full border p-2 rounded bg-gray-100" readonly></div>
-            <div><label class="block text-sm text-gray-600 mb-1">Harga/Satuan</label><input type="number" id="s-harga" class="w-full border p-2 rounded ${masuk ? 'bg-white focus:outline-indigo-500' : 'bg-gray-200 text-gray-700 cursor-not-allowed'}" ${masuk ? '' : 'readonly'} placeholder="Rp 0" ${masuk ? 'oninput="perbaruiInfoHargaStok()"' : ''}><div id="s-info-harga" class="text-xs text-amber-700 mt-1 min-h-[1rem]"></div></div>
-        </div>
-        <div class="mb-6"><label class="block text-sm text-gray-600 mb-1">Referensi / Nota</label><input type="text" id="s-referensi" class="w-full border p-2 rounded focus:outline-indigo-500" placeholder="Contoh: Nota Pembelian / Nama Toko"></div>
-        <div class="flex justify-end gap-2 border-t pt-4">
-            <button onclick="tampilFormStok('${jenis}')" class="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded shadow">Kosongkan</button>
-            <button onclick="simpanTransaksiStok()" class="bg-${warna}-600 hover:bg-${warna}-700 text-white px-6 py-2 rounded shadow font-bold"><i class="fas fa-save mr-2"></i>Simpan Barang ${masuk ? 'Masuk' : 'Keluar'}</button>
-        </div>
-    </div>
-    <div class="bg-white rounded-lg shadow p-4">
-        <h3 class="font-bold text-gray-700 mb-3">10 Transaksi Barang ${masuk ? 'Masuk' : 'Keluar'} Terakhir</h3>
-        <div class="overflow-x-auto"><table class="min-w-full text-left text-sm"><thead><tr class="bg-gray-800 text-white"><th class="p-2">Tgl</th><th class="p-2">Material</th><th class="p-2 text-center">Qty</th><th class="p-2">Keterangan</th></tr></thead><tbody>${riwayat}</tbody></table></div>
-    </div>`;
-    onChangeAlokasiStok();
+function badgeBelanjaRap(b) {
+    const k = b.sb.kode, sat = escRap(b.sat);
+    if (k === 'sudah') return `<span class="inline-block px-2 py-0.5 rounded bg-green-100 text-green-800 font-semibold">Sudah dibeli</span><div class="text-gray-500">${b.sb.dibeli} ${sat}</div>`;
+    if (k === 'sebagian') return `<span class="inline-block px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold">Sebagian ${b.sb.dibeli}/${b.sb.perlu}</span><div class="text-gray-500">sisa ${Math.round((b.sb.perlu - b.sb.dibeli) * 100) / 100} ${sat}</div>`;
+    if (k === 'belum') return `<span class="inline-block px-2 py-0.5 rounded bg-red-100 text-red-700 font-semibold">Belum dibeli</span>`;
+    return '<span class="text-gray-400">-</span>';
 }
+function ubahFilterBelanja() { rbFilter = document.getElementById('rb-filter').value; renderWSBelanja(); }
 
-const HINT_ALOKASI_STOK = {
-    'Pembelian Umum': 'Stok umum: boleh dipakai oleh semua project.',
-    'Pembelian Project': 'Stok alokasi: khusus untuk project yang dipilih (dihitung di RAP Belanja project itu saja).',
-    'Dipakai Project (RAP Final)': 'Diambil dari alokasi project itu lebih dulu, kekurangannya dari stok umum.',
-    'Penyesuaian (Keluar)': 'Mengurangi stok umum.'
-};
-function onChangeAlokasiStok() {
-    const wrap = document.getElementById('wrap-stok-project');
-    if(document.getElementById('s-alokasi').value.includes('Project')) wrap.classList.remove('hidden');
-    else { wrap.classList.add('hidden'); document.getElementById('s-project-search').value = ''; document.getElementById('s-project-id').value = ''; }
-    document.getElementById('s-hint-alokasi').textContent = HINT_ALOKASI_STOK[document.getElementById('s-alokasi').value] || '';
-    perbaruiInfoStok();
-}
+function renderWSBelanja() {
+    if (rbProyek !== activeWorkspaceData.projectInfo.Project_ID) { rbProyek = activeWorkspaceData.projectInfo.Project_ID; rbFilter = 'semua'; }
+    const rp = n => 'Rp ' + (n || 0).toLocaleString('id-ID');
+    const bulat = n => Math.round(n * 100) / 100;
+    const peta = petaSupplierRap();
+    const semua = [];
 
-// Info stok di bawah kolom material, sesuai jenis transaksi, alokasi, dan project yang dipilih.
-// Rincian stok yang bisa dikeluarkan untuk pilihan saat ini (Barang Keluar). Null untuk Barang Masuk.
-function alokasiBelumPilihProject() { return document.getElementById('s-jenis').value === 'Keluar' && document.getElementById('s-alokasi').value.startsWith('Dipakai Project') && !document.getElementById('s-project-id').value; }
-function namaKlienStok(pid) { const p = currentProjectData.find(x => x.Project_ID === pid); return (p && p.Nama_PIC_Klien) || pid; }
-function rincianStokKeluar(nama) {
-    const jenis = document.getElementById('s-jenis').value; if (jenis !== 'Keluar') return null;
-    const alok = document.getElementById('s-alokasi').value, pid = document.getElementById('s-project-id').value;
-    const u = Math.max(0, bulatStok(stokUmum(nama)));
-    if (alok.startsWith('Dipakai Project')) {
-        if (!pid) return { teks: `Umum ${u}`, total: u, perinci: `umum ${u}; alokasi hanya bisa dipakai oleh klien pemiliknya` };
-        const a = Math.max(0, bulatStok(stokAlokasi(nama, pid))); const kl = namaKlienStok(pid); return { teks: `Alokasi ${kl} ${a} \u00b7 Umum ${u}`, total: bulatStok(a + u), perinci: `alokasi ${kl} ${a} + umum ${u}` };
-    }
-    return { teks: `Umum ${u}`, total: u, perinci: `umum ${u}` };
-}
-function labelStokPilihan(nama, sat) {
-    const d = rincianStokKeluar(nama); if (!d) return null;
-    return d.total > 0 ? { teks: `\u2014 ${d.teks} ${sat}`, kosong: false } : { teks: '\u2014 Stok kosong', kosong: true };
-}
-function perbaruiInfoStok() {
-    const el = document.getElementById('s-info-stok'), nama = document.getElementById('s-nama').value; if (!el) return;
-    const sat = document.getElementById('s-satuan').value, u = bulatStok(stokUmum(nama)), a = bulatStok(stokAlokasiSemua(nama));
-    el.className = 'text-xs text-gray-500 mt-1 min-h-[1rem]';
-    const dk = nama ? rincianStokKeluar(nama) : null;
-    if (dk) {   // Barang Keluar: kotak status stok yang jelas setelah material dipilih
-        const sat0 = document.getElementById('s-satuan').value;
-        if (dk.total > 0) { el.className = 'mt-1 p-2 rounded border border-emerald-300 bg-emerald-50 text-emerald-800 text-sm font-semibold'; el.textContent = `Stok tersedia: ${dk.total} ${sat0} (${dk.perinci})`; }
-        else { el.className = 'mt-1 p-2 rounded border border-red-300 bg-red-50 text-red-700 text-sm font-semibold'; el.textContent = `Stok kosong: tidak ada ${nama} yang bisa dikeluarkan.`; }
-        if (alokasiBelumPilihProject()) el.textContent += ' Pilih klien untuk melihat alokasinya.';
-        return;
-    }
-    if (!nama || !gudangKolam.some(k => k.Nama_Item === nama)) { el.textContent = nama ? 'Belum ada stok material ini.' : ''; return; }
-    const j = document.getElementById('s-jenis').value, alok = document.getElementById('s-alokasi').value, pid = document.getElementById('s-project-id').value;
-    if (j === 'Masuk') el.textContent = `Stok saat ini: umum ${u}, alokasi project ${a} ${sat}`;
-    else if (alok.startsWith('Dipakai Project')) el.textContent = pid ? `Tersedia untuk project ini: ${bulatStok(stokUntukProject(nama, pid))} ${sat} (alokasi ${bulatStok(stokAlokasi(nama, pid))} + umum ${u})` : `Stok umum ${u}, alokasi semua project ${a} ${sat}. Pilih klien untuk melihat yang tersedia.`;
-    else el.textContent = `Stok umum tersedia: ${Math.max(0, u)} ${sat}`;
-}
+    activeWorkspaceData.rapAwal.filter(r => r.Kategori === 'Material').forEach(r => {
+        let sp = activeWorkspaceData.stokProject ? (activeWorkspaceData.stokProject[r.Nama_Item] || { Umum: 0, Alokasi: 0 }) : null;
+        if (!sp) { const dS = activeWorkspaceData.gudangStock.find(s => s.Nama_Item === r.Nama_Item); sp = { Umum: dS ? (parseFloat(dS.Total_Stok) || 0) : 0, Alokasi: 0 }; } // cadangan bila Apps Script belum diperbarui
+        const stok = Math.max(0, bulat(sp.Alokasi + sp.Umum));
+        const bersama = sp.Umum > 0 ? ((activeWorkspaceData.pemakaiBersama || {})[r.Nama_Item] || []) : [];
+        const butuh = parseFloat(r.Qty) || 0;
+        const beli = Math.max(0, bulat(butuh - stok));
+        const harga = parseFloat(r.Harga_Satuan) || 0;
+        const sup = supplierItemRap(peta, r.Nama_Item);
+        const status = beli <= 0 ? 'cukup' : (stok <= 0 ? 'kosong' : 'kurang');
+        const dibeli = (activeWorkspaceData.belanjaMaterial || {})[r.Nama_Item] || 0;
+        const dipakai = (activeWorkspaceData.stokMaterialFinal || []).filter(m => (m.Nama_Material || m.Nama_Item) === r.Nama_Item).reduce((t, m) => t + (parseFloat(m.Qty_Keluar) || 0), 0);
+        const sb = activeWorkspaceData.belanjaMaterial ? statusBelanjaRap(butuh, stok, dibeli, dipakai) : { kode: 'tidak', perlu: 0, dibeli: 0 };
+        semua.push({ sup, status, sb, nama: r.Nama_Item, sat: r.Satuan, stok, umum: bulat(Math.max(0, sp.Umum)), alok: bulat(Math.max(0, sp.Alokasi)), bersama, butuh, beli, harga, total: bulat(beli * harga) });
+    });
 
-function liveSearchMaterialStok() {
-    let inp = document.getElementById('s-nama').value.toLowerCase(); let ul = document.getElementById('s-search-material'); ul.innerHTML = '';
-    { const inf = document.getElementById('s-info-stok'); inf.textContent = ''; inf.className = 'text-xs text-gray-500 mt-1 min-h-[1rem]'; }
-    if(inp.length < 1){ ul.classList.add('hidden'); return; }
-    let fil = masterMaterial.filter(i => (i.Nama_Item||"").toLowerCase().includes(inp));
-    if(fil.length > 0) {
-        ul.classList.remove('hidden');
-        fil.forEach(i => {
-            let sat = (i.Satuan_Standar||"").toString().trim(); sat = sat.substring(sat.indexOf(' ')+1)||sat;
-            let li = document.createElement('li'); li.className = "p-2 border-b cursor-pointer hover:bg-indigo-50 text-sm"; li.textContent = `${i.Nama_Item} (${sat})`;
-            const tag = labelStokPilihan(i.Nama_Item, sat);   // hanya Barang Keluar: acuan stok umum / alokasi di samping nama
-            if (tag) { const sp = document.createElement('span'); sp.className = 'ml-2 text-xs font-semibold ' + (tag.kosong ? 'text-red-500' : 'text-emerald-600'); sp.textContent = tag.teks; li.appendChild(sp); }
-            li.onclick = () => {
-                document.getElementById('s-nama').value = i.Nama_Item; document.getElementById('s-satuan').value = sat;
-                perbaruiInfoStok();
-                // Harga selalu dari Master Material (harga terbaru). Barang Masuk boleh diedit sesuai nota; Barang Keluar terkunci.
-                const hm = hargaMasterStok(i.Nama_Item);
-                document.getElementById('s-harga').value = hm > 0 ? hm : "";
-                perbaruiInfoHargaStok();
-                document.getElementById(hm > 0 || document.getElementById('s-jenis').value !== 'Masuk' ? 's-qty' : 's-harga').focus();
-                ul.classList.add('hidden');
-            }; ul.appendChild(li);
+    const jumlah = { semua: semua.length, beli: semua.filter(b => b.status !== 'cukup').length, kosong: semua.filter(b => b.status === 'kosong').length, cukup: semua.filter(b => b.status === 'cukup').length, belum: semua.filter(b => b.sb.kode === 'belum').length, sebagian: semua.filter(b => b.sb.kode === 'sebagian').length, sudah: semua.filter(b => b.sb.kode === 'sudah').length };
+    const cocok = { semua: () => true, beli: b => b.status !== 'cukup', kosong: b => b.status === 'kosong', cukup: b => b.status === 'cukup', belum: b => b.sb.kode === 'belum', sebagian: b => b.sb.kode === 'sebagian', sudah: b => b.sb.kode === 'sudah' }[rbFilter];
+    const urutStatus = { kosong: 0, kurang: 1, cukup: 2 };
+    const grup = {};
+    semua.filter(cocok).forEach(b => { (grup[b.sup] = grup[b.sup] || []).push(b); });
+
+    const daftarSup = Object.keys(grup).sort(bandingSupplierRap);
+    let grand = 0, adaBaris = false;
+    let body = '';
+    daftarSup.forEach(sup => {
+        const baris = grup[sup].sort((a, b) => (urutStatus[a.status] - urutStatus[b.status]) || String(a.nama).localeCompare(String(b.nama), 'id'));
+        const sub = baris.reduce((t, b) => t + b.total, 0);
+        grand += sub; adaBaris = true;
+        body += `<tr class="bg-indigo-50"><td colspan="10" class="p-2 border font-bold text-indigo-900"><i class="fas fa-store mr-2 text-indigo-400"></i>${escRap(sup)} <span class="font-normal text-xs text-gray-500">(${baris.length} material)</span></td></tr>`;
+        baris.forEach(b => {
+            body += `<tr class="border-b"><td class="p-2 border">${escRap(b.nama)}</td><td class="p-2 border text-xs">${escRap(sup === SUPPLIER_KOSONG_RAP ? '-' : sup)}</td><td class="p-2 border text-center bg-blue-50"><span class="stok-total">${b.stok}</span><div class="text-xs text-gray-500">Umum ${b.umum} &middot; Alokasi ${b.alok}</div></td><td class="p-2 border text-center">${b.butuh}</td><td class="p-2 border text-center font-bold text-red-700 ${b.beli > 0 ? 'bg-red-50' : ''}">${b.beli}</td><td class="p-2 border text-center">${escRap(b.sat)}</td><td class="p-2 border text-right">${rp(b.harga)}</td><td class="p-2 border text-right font-bold">${rp(b.total)}</td><td class="p-2 border text-xs text-center status-belanja">${badgeBelanjaRap(b)}</td><td class="p-2 border text-xs"><span class="ket-beli">${b.beli > 0 ? 'Beli ' + b.beli + ' ' + escRap(b.sat) : '<span class="text-green-700">Stok cukup</span>'}</span>${b.status === 'kosong' ? '<div class="ket-status text-red-700 font-semibold">Stok kosong</div>' : (b.status === 'kurang' ? '<div class="ket-status text-orange-700 font-semibold">Stok kurang</div>' : '')}${b.bersama.length ? `<div class="text-amber-700 mt-1"><i class="fas fa-share-alt mr-1"></i>Stok umum dipakai bersama: ${escRap(b.bersama.join(', '))}</div>` : ''}</td></tr>`;
         });
-    }
-}
-function liveSearchProjectStok() {
-    let inp = document.getElementById('s-project-search').value.toLowerCase(); let ul = document.getElementById('s-search-project'); ul.innerHTML = '';
-    if(inp.length < 1){ ul.classList.add('hidden'); return; }
-    let fil = currentProjectData.filter(p => (p.Nama_PIC_Klien||"").toLowerCase().includes(inp));
-    if(fil.length > 0) {
-        ul.classList.remove('hidden');
-        fil.forEach(p => {
-            let li = document.createElement('li'); li.className = "p-3 border-b cursor-pointer hover:bg-indigo-50 text-sm"; li.innerHTML = `<span class="font-bold text-indigo-700">${escStok(p.Nama_PIC_Klien||'Tanpa Klien')}</span><div class="text-xs">${escStok(p.Nama_Project)}</div>`;
-            li.onclick = () => { document.getElementById('s-project-search').value = `${p.Nama_PIC_Klien} - ${p.Nama_Project}`; document.getElementById('s-project-id').value = p.Project_ID; ul.classList.add('hidden'); perbaruiInfoStok(); }; ul.appendChild(li);
-        });
-    }
-}
-// Harga satuan di Master Material (angka). 0 bila material tidak ada di master atau harganya kosong.
-function masterItemStok(nama) { return masterMaterial.find(i => i.Nama_Item === nama); }
-function hargaMasterStok(nama) { const m = masterItemStok(nama); const n = m ? Number(String(m.Harga_Estimasi == null ? '' : m.Harga_Estimasi).replace(/[^0-9.\-]/g, '')) : 0; return isNaN(n) ? 0 : n; }
-// Keterangan di bawah kolom harga (Barang Masuk): harga master, dan peringatan bila harga nota diubah.
-function perbaruiInfoHargaStok() {
-    const el = document.getElementById('s-info-harga'); if (!el) return;
-    const nama = document.getElementById('s-nama').value, hm = hargaMasterStok(nama), h = parseFloat(document.getElementById('s-harga').value) || 0;
-    if (!nama) { el.textContent = ''; return; }
-    if (document.getElementById('s-jenis').value !== 'Masuk') { el.textContent = hm > 0 ? 'Harga dari Master Material.' : 'Harga di Master Material masih kosong. Isi dulu di menu Material.'; return; }
-    el.textContent = h > 0 && h !== hm ? `Harga beda dari Master (Rp ${hm.toLocaleString('id-ID')}). Saat disimpan, Master Material ikut diperbarui.` : (hm > 0 ? 'Harga dari Master Material. Ubah bila nota berbeda.' : 'Material belum punya harga di Master. Harga ini akan menjadi harga Master.');
-}
-async function simpanTransaksiStok() {
-    const isP = !document.getElementById('wrap-stok-project').classList.contains('hidden'); const pId = document.getElementById('s-project-id').value;
-    if(isP && (!pId || document.getElementById('s-project-search').value === "")) return alert("Pilih Klien valid!");
-    const tgl = document.getElementById('s-tanggal').value, j = document.getElementById('s-jenis').value, alok = document.getElementById('s-alokasi').value;
-    const nama = document.getElementById('s-nama').value, qty = parseFloat(document.getElementById('s-qty').value)||0, hrg = parseFloat(document.getElementById('s-harga').value)||0, sat = document.getElementById('s-satuan').value, ref = document.getElementById('s-referensi').value||"-";
-    if(!nama || qty <= 0 || hrg <= 0) return alert("Nama, Qty, Harga wajib diisi (tidak boleh 0)!");
-    if(j === 'Keluar') {
-        const tersedia = alok.startsWith('Dipakai Project') ? stokUntukProject(nama, pId) : Math.max(0, stokUmum(nama));
-        if(bulatStok(qty) > bulatStok(tersedia)) return alert(`Stok tidak cukup! ${alok.startsWith('Dipakai Project') ? 'Yang tersedia untuk project ini (alokasi + umum)' : 'Stok umum'} untuk ${nama} adalah ${bulatStok(tersedia)} ${sat}, sedangkan yang dikeluarkan ${qty}.`);
-    }
-
-    showLoading("Menyimpan Stok...");
-    const res = await apiSaveMaster('Data_Kartu_Stok', ["STK-"+new Date().getTime(), tgl, nama, j, alok, isP?pId:"", j==="Masuk"?qty:0, j==="Keluar"?qty:0, sat, hrg, qty*hrg, ref]);
-    if(res.success) {
-        let info = `Barang ${j === 'Masuk' ? 'masuk' : 'keluar'} tersimpan: ${nama}, ${qty} ${sat}.`;
-        // Barang Masuk dengan harga nota berbeda: Master Material ikut diperbarui, supaya Master selalu harga terbaru.
-        const m = masterItemStok(nama);
-        if (j === 'Masuk' && m && hrg !== hargaMasterStok(nama)) {
-            const up = await apiUpdateMaster('Master_Material', m.rowIndex, [m.Material_ID, m.Nama_Item, m.Satuan_Standar, hrg, m.Supplier]);
-            if (up.success) { m.Harga_Estimasi = String(hrg); info += ` Harga di Master Material diperbarui menjadi Rp ${hrg.toLocaleString('id-ID')}.`; }
-            else info += ` Namun harga di Master Material gagal diperbarui (${up.message}). Ubah manual di menu Material.`;
-        }
-        if(j === 'Masuk') renderStokMasuk(info); else renderStokKeluar(info);
-    }
-    else { hideLoading(); alert(res.message); }
-}
-
-// Transaksi keluar (pemakaian RAP Final / penyesuaian keluar) yang saat dicatat stoknya belum cukup (tercatat sebelum barang masuknya).
-function analisisUrutanStok() {
-    const lama = gudangLogs.slice().reverse(), k1 = [];
-    hitungKolamStok(lama, k1);
-    const kandidat = k1.filter(l => String(l.Project_ID || '').trim() ? true : /^Penyesuaian/.test(String(l.Kategori_Alokasi || '')));
-    const set = new Set(kandidat), k2 = [];
-    hitungKolamStok(lama.filter(l => !set.has(l)).concat(kandidat), k2);   // andaikan dipindah ke belakang: yang masih kurang = stoknya memang tidak cukup
-    const tetap = new Set(k2);
-    return { bisa: kandidat.filter(l => !tetap.has(l)), kurang: kandidat.filter(l => tetap.has(l)) };
-}
-function pemakaianPerluRapikan() { return analisisUrutanStok().bisa; }
-// Catat ulang transaksi tsb sebagai transaksi terbaru (tanggal, qty, harga tetap), lalu hapus baris lamanya. RAP Final tidak diubah.
-async function rapikanUrutanStok() {
-    const daftar = pemakaianPerluRapikan(); if (!daftar.length) return renderStokData('Tidak ada transaksi yang perlu dirapikan.');
-    if (!confirm(`Catat ulang ${daftar.length} transaksi keluar sebagai transaksi terbaru?\n\nJumlah, tanggal, harga, dan data RAP Final tidak berubah. Hanya urutan pencatatannya yang dipindah ke belakang barang masuk.`)) return;
-    showLoading('Merapikan urutan pencatatan...');
-    const stamp = Date.now(); let gagal = 0, baru = [];
-    for (let i = 0; i < daftar.length; i++) {
-        const l = daftar[i], row = ['STK-' + stamp + '-' + (i + 1), l.Tanggal, l.Nama_Material || l.Nama_Item, l.Jenis_Transaksi, l.Kategori_Alokasi, l.Project_ID, l.Qty_Masuk, l.Qty_Keluar, l.Satuan, l.Harga_Satuan, l.Total_Nilai, l.Referensi];
-        const res = await apiSaveMaster('Data_Kartu_Stok', row); if (res.success) baru.push(l); else gagal++;
-    }
-    for (const l of baru) { const d = await apiDeleteMaster('Data_Kartu_Stok', l.rowIndex); if (!d.success) gagal++; }
-    bersihkanCacheGudang(); hideLoading();
-    if (gagal) alert(`${gagal} langkah gagal. Buka Riwayat Barang dan periksa kemungkinan transaksi ganda sebelum mencoba lagi.`);
-    await renderStokData(`${baru.length} transaksi keluar dirapikan urutannya.`);
-}
-
-// ------------------------- DATA STOK (stok aktual + riwayat) -------------------------
-// Stok aktual ditampilkan per kolam: baris "Stok Umum" dan baris "Alokasi Project" untuk tiap material.
-async function renderStokData(notice) {
-    if (!(await muatDataStok())) return;
-    currentPageStok = 1; stokCari = ''; stokKolam = 'semua'; stokAksi = null;
-    document.getElementById('header-title').innerText = 'Manajemen Stok';
-    const sum = f => gudangKolam.filter(f).reduce((t, k) => t + k.Nilai, 0);
-    const nUmum = sum(k => k.Kolam === 'Umum'), nAlok = sum(k => k.Kolam === 'Project');
-    const an = analisisUrutanStok(), perlu = an.bisa.length;
-    const namaKurang = [...new Set(an.kurang.map(l => l.Nama_Material || l.Nama_Item))];
-    document.getElementById('main-content').innerHTML = `${notice ? `<div class="bg-green-50 border border-green-300 text-green-800 text-sm p-3 rounded mb-4"><i class="fas fa-check-circle mr-2"></i>${escStok(notice)}</div>` : ''}${perlu ? `<div id="banner-rapikan" class="bg-amber-50 border border-amber-300 text-amber-900 text-sm p-3 rounded mb-4 flex flex-wrap items-center justify-between gap-3"><div><i class="fas fa-exclamation-triangle mr-2"></i><b>${perlu} transaksi keluar</b> tercatat sebelum barang masuknya, sehingga stok umum/nilai stok bisa tidak sesuai. Jumlah, tanggal, dan nilai di RAP Final tidak berubah.</div><button id="btn-rapikan" onclick="rapikanUrutanStok()" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded font-semibold"><i class="fas fa-sort-amount-down mr-1"></i>Rapikan Urutan Pencatatan</button></div>` : ''}${an.kurang.length ? `<div id="banner-kurang" class="bg-red-50 border border-red-300 text-red-800 text-sm p-3 rounded mb-4"><i class="fas fa-box-open mr-2"></i><b>${an.kurang.length} transaksi keluar stoknya memang kurang</b> (bukan soal urutan): ${namaKurang.slice(0, 6).map(escStok).join(', ')}${namaKurang.length > 6 ? ', ...' : ''}. Tambahkan Barang Masuk, atau periksa Qty pemakaiannya di RAP Final. Minusnya hilang setelah barangnya dimasukkan.</div>` : ''}<div id="panel-aksi-stok" class="hidden"></div><div class="bg-white rounded-lg shadow mb-6 flex flex-col"><div class="p-4 border-b flex flex-wrap justify-between items-center gap-3"><h2 class="text-xl font-bold text-gray-800"><i class="fas fa-warehouse text-indigo-600 mr-2"></i>Data Stok</h2><div class="flex flex-wrap items-center gap-3"><select id="filter-kolam-stok" onchange="ubahFilterKolamStok()" class="border p-2 rounded text-sm bg-white"><option value="semua">Semua stok</option><option value="umum">Stok Umum</option><option value="project">Alokasi Project</option></select><div class="relative"><i class="fas fa-search absolute left-3 top-2.5 text-gray-400"></i><input type="text" id="cari-stok" onkeyup="cariStok()" placeholder="Cari material / project..." class="pl-10 border p-2 rounded w-64 text-sm focus:outline-indigo-500"></div><div class="bg-indigo-50 border border-indigo-200 rounded px-4 py-1.5 text-right"><div class="text-xs text-indigo-600 font-semibold uppercase">Total Aset Stok</div><div id="total-aset-stok" class="text-lg font-bold text-indigo-900">${rpStok(nUmum + nAlok)}</div><div class="text-xs text-gray-500">Umum ${rpStok(nUmum)} &middot; Alokasi ${rpStok(nAlok)}</div></div></div></div><div class="flex border-b"><button onclick="switchTabStok('stok')" id="t-stok" class="w-1/3 py-3 tab-active transition">Stok Aktual</button><button onclick="switchTabStok('rekap')" id="t-rekap" class="w-1/3 py-3 tab-inactive transition hover:bg-gray-50">Rekap per Alokasi</button><button onclick="switchTabStok('log')" id="t-log" class="w-1/3 py-3 tab-inactive transition hover:bg-gray-50">Riwayat Barang (Masuk/Keluar)</button></div><div id="area-stok" class="p-4"></div><div id="area-rekap" class="p-4 hidden"></div><div id="area-log" class="p-4 hidden"></div></div>`;
-    renderTabelStokAktual(); renderRekapAlokasi(); renderTabelStokLog();
-}
-
-function cariStok() { stokCari = document.getElementById('cari-stok').value.trim().toLowerCase(); currentPageStok = 1; renderTabelStokAktual(); renderRekapAlokasi(); renderTabelStokLog(); }
-function ubahFilterKolamStok() { stokKolam = document.getElementById('filter-kolam-stok').value; currentPageStok = 1; renderTabelStokAktual(); }
-
-function renderTabelStokAktual() {
-    const data = gudangKolam.map((k, idx) => ({ k, idx })).filter(({ k }) => {
-        if (stokKolam === 'umum' && k.Kolam !== 'Umum') return false;
-        if (stokKolam === 'project' && k.Kolam !== 'Project') return false;
-        return !stokCari || String(k.Nama_Item || '').toLowerCase().includes(stokCari) || (k.Kolam === 'Project' && labelProjectStok(k.Project_ID).toLowerCase().includes(stokCari));
+        body += `<tr class="bg-gray-100 font-semibold"><td colspan="7" class="p-2 border text-right">Subtotal ${escRap(sup)}</td><td class="p-2 border text-right">${rp(sub)}</td><td class="p-2 border" colspan="2"></td></tr>`;
     });
-    const tot = Math.ceil(data.length / 10) || 1; const slice = data.slice((currentPageStok - 1) * 10, currentPageStok * 10);
-    let h = `<div class="overflow-x-auto"><table class="min-w-full text-left text-sm mb-4"><thead><tr class="bg-gray-800 text-white"><th class="p-3">Nama Material</th><th class="p-3">Alokasi</th><th class="p-3 text-center">Stok</th><th class="p-3 text-right">Harga / Satuan</th><th class="p-3 text-right">Nilai Stok</th><th class="p-3 text-center no-print">Aksi</th></tr></thead><tbody>`;
-    if (slice.length === 0) h += `<tr><td colspan="6" class="p-4 text-center italic text-gray-500">${(stokCari || stokKolam !== 'semua') ? 'Tidak ada stok yang cocok.' : 'Gudang kosong.'}</td></tr>`;
-    slice.forEach(({ k, idx }) => {
-        const umum = k.Kolam === 'Umum';
-        const badge = umum ? `<span class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-0.5 rounded">Stok Umum</span>` : `<span class="inline-block bg-indigo-100 text-indigo-800 text-xs font-semibold px-2 py-0.5 rounded"><i class="fas fa-user-tag mr-1"></i>${escStok(labelProjectStok(k.Project_ID))}</span>`;
-        const aksi = `<button onclick="editStok(${idx})" title="Edit stok, harga, atau alokasi" class="text-blue-500 mx-1"><i class="fas fa-edit"></i></button>` +
-            (umum ? `<button onclick="hapusStok(${idx})" title="Hapus item stok (semua kolam)" class="text-red-500 mx-1"><i class="fas fa-trash"></i></button>` : '');
-        h += `<tr class="border-b hover:bg-gray-50"><td class="p-3 font-semibold text-gray-700">${escStok(k.Nama_Item)} <span class="text-xs text-gray-400">(${escStok(k.Satuan || '-')})</span></td><td class="p-3">${badge}</td><td class="p-3 text-center text-lg font-bold ${k.Stok<=0?'text-red-500 bg-red-50':'text-green-600 bg-green-50'}">${bulatStok(k.Stok)}</td><td class="p-3 text-right">${rpStok(k.Harga)}</td><td class="p-3 text-right font-bold">${rpStok(k.Nilai)}</td><td class="p-3 text-center no-print whitespace-nowrap">${aksi}</td></tr>`;
-    });
-    document.getElementById('area-stok').innerHTML = h + `</tbody></table></div><div class="flex justify-between items-center text-sm text-gray-600 mt-2"><span>Hal ${currentPageStok} dari ${tot}</span><div class="flex gap-2"><button onclick="if(currentPageStok>1){currentPageStok--;renderTabelStokAktual();}" class="px-3 py-1 border rounded bg-white hover:bg-gray-100">Prev</button><button onclick="if(currentPageStok<${tot}){currentPageStok++;renderTabelStokAktual();}" class="px-3 py-1 border rounded bg-white hover:bg-gray-100">Next</button></div></div>`;
-}
+    if (!adaBaris) body = `<tr><td colspan="10" class="p-4 border text-center text-gray-500">${semua.length ? 'Tidak ada material pada filter ini.' : 'Belum ada material di RAP Awal project ini.'}</td></tr>`;
 
-function tutupPanelStok() { stokAksi = null; const p = document.getElementById('panel-aksi-stok'); p.className = 'hidden'; p.innerHTML = ''; }
-function bukaPanelStok(html, warna) {
-    const p = document.getElementById('panel-aksi-stok'); p.className = `bg-${warna}-50 border border-${warna}-300 rounded-lg p-4 mb-4 no-print`; p.innerHTML = html;
-    p.scrollIntoView && p.scrollIntoView({ block: 'nearest' });
-}
-function namaKolamStok(k) { return k.Kolam === 'Umum' ? 'Stok Umum' : 'Alokasi ' + labelProjectStok(k.Project_ID); }
-
-// Edit = koreksi stok/harga satu kolam DAN/ATAU pindah alokasi (umum <-> project, project <-> project).
-// Riwayat lama tidak diubah; semua perubahan dicatat sebagai transaksi baru.
-function editStok(idx) {
-    const k = gudangKolam[idx]; stokAksi = { jenis: 'edit', idx };
-    const umum = k.Kolam === 'Umum';
-    bukaPanelStok(`<h4 class="font-bold text-orange-700 mb-3"><i class="fas fa-edit mr-2"></i>Edit Stok: ${escStok(k.Nama_Item)} <span class="text-xs font-normal text-gray-500">(${escStok(k.Satuan || '-')}) &middot; sekarang: ${escStok(namaKolamStok(k))}</span></h4>
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-        <div><label class="block text-xs font-semibold mb-1">Stok sebenarnya</label><input type="number" id="k-stok" value="${bulatStok(Math.max(0, k.Stok))}" oninput="onChangeTujuanKoreksi()" class="w-full border p-2 rounded text-sm"></div>
-        <div><label class="block text-xs font-semibold mb-1">Harga / satuan</label><input type="number" id="k-harga" value="${Math.round(k.Harga)}" class="w-full border p-2 rounded text-sm"></div>
-        <div><label class="block text-xs font-semibold mb-1">Alasan</label><input type="text" id="k-ref" value="Koreksi stok" class="w-full border p-2 rounded text-sm"></div>
-    </div>
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-        <div><label class="block text-xs font-semibold mb-1">Alokasi</label><select id="k-tujuan" onchange="onChangeTujuanKoreksi()" class="w-full border p-2 rounded text-sm bg-white"><option value="umum"${umum ? ' selected' : ''}>Stok Umum</option><option value="project"${umum ? '' : ' selected'}>Alokasi Project (cari nama project)</option></select></div>
-        <div id="k-wrap-proj" class="relative ${umum ? 'hidden' : ''}"><label class="block text-xs font-semibold mb-1 text-indigo-700">Project tujuan</label><input type="text" id="k-proj-search" value="${umum ? '' : escStok(labelProjectStok(k.Project_ID))}" onkeyup="cariProjectKoreksi()" placeholder="Ketik nama klien..." autocomplete="off" class="w-full border border-indigo-300 bg-indigo-50 p-2 rounded text-sm"><input type="hidden" id="k-proj-id" value="${umum ? '' : escStok(k.Project_ID)}"><ul id="k-proj-list" class="absolute z-50 w-full bg-white border border-gray-200 shadow-xl rounded max-h-40 overflow-y-auto hidden"></ul></div>
-        <div id="k-wrap-pindah" class="hidden"><label class="block text-xs font-semibold mb-1">Jumlah dipindah</label><input type="number" id="k-pindah" class="w-full border p-2 rounded text-sm"></div>
-    </div>
-    <div class="flex gap-2 mt-3"><button onclick="tutupPanelStok()" class="bg-gray-400 text-white px-4 py-2 rounded text-sm">Batal</button><button onclick="simpanKoreksiStok()" class="bg-orange-500 hover:bg-orange-600 text-white font-bold px-4 py-2 rounded text-sm">Simpan</button></div>
-    <p class="text-xs text-gray-500 mt-2">Ubah stok/harga untuk koreksi. Ganti alokasi untuk memindahkan stok (sebagian atau seluruhnya) ke stok umum atau ke project lain. Semuanya tercatat di Riwayat.</p>`, 'orange');
-}
-
-// Tujuan alokasi yang dipilih di panel Edit: { pid } ('' = stok umum).
-function tujuanKoreksi() {
-    return { pid: document.getElementById('k-tujuan').value === 'umum' ? '' : document.getElementById('k-proj-id').value };
-}
-function onChangeTujuanKoreksi() {
-    const k = stokAksi && stokAksi.jenis === 'edit' ? gudangKolam[stokAksi.idx] : null; if (!k) return;
-    const proj = document.getElementById('k-tujuan').value === 'project';
-    document.getElementById('k-wrap-proj').classList.toggle('hidden', !proj);
-    const beda = tujuanKoreksi().pid !== (k.Project_ID || '') && (!proj || document.getElementById('k-proj-id').value !== '');
-    const w = document.getElementById('k-wrap-pindah'); w.classList.toggle('hidden', !beda);
-    if (beda && document.getElementById('k-pindah').value === '') document.getElementById('k-pindah').value = document.getElementById('k-stok').value;
-    if (!beda) document.getElementById('k-pindah').value = '';
-}
-function cariProjectKoreksi() {
-    const inp = document.getElementById('k-proj-search').value.toLowerCase(), ul = document.getElementById('k-proj-list'); ul.innerHTML = '';
-    document.getElementById('k-proj-id').value = ''; onChangeTujuanKoreksi();
-    if (inp.length < 1) { ul.classList.add('hidden'); return; }
-    const fil = currentProjectData.filter(p => (p.Nama_PIC_Klien || '').toLowerCase().includes(inp) || (p.Nama_Project || '').toLowerCase().includes(inp));
-    if (fil.length === 0) { ul.classList.add('hidden'); return; }
-    ul.classList.remove('hidden');
-    fil.forEach(p => {
-        const li = document.createElement('li'); li.className = 'p-3 border-b cursor-pointer hover:bg-indigo-50 text-sm'; li.innerHTML = `<span class="font-bold text-indigo-700">${escStok(p.Nama_PIC_Klien || 'Tanpa Klien')}</span><div class="text-xs">${escStok(p.Nama_Project)}</div>`;
-        li.onclick = () => { document.getElementById('k-proj-search').value = `${p.Nama_PIC_Klien} - ${p.Nama_Project}`; document.getElementById('k-proj-id').value = p.Project_ID; ul.classList.add('hidden'); onChangeTujuanKoreksi(); };
-        ul.appendChild(li);
-    });
-}
-
-async function simpanKoreksiStok() {
-    const k = stokAksi && stokAksi.jenis === 'edit' ? gudangKolam[stokAksi.idx] : null; if (!k) return;
-    const nama = k.Nama_Item, sat = k.Satuan || '', pid = k.Project_ID || '';
-    const S = parseFloat(document.getElementById('k-stok').value), P = parseFloat(document.getElementById('k-harga').value) || 0, ref = document.getElementById('k-ref').value || 'Koreksi stok';
-    if (isNaN(S) || S < 0) return alert("Stok sebenarnya harus diisi (0 atau lebih)!");
-    if (S > 0 && P <= 0) return alert("Harga / satuan wajib diisi bila stok lebih dari 0!");
-    const tuj = tujuanKoreksi(); let M = 0;
-    if (document.getElementById('k-tujuan').value === 'project' && !tuj.pid) return alert("Pilih project tujuan dari daftar!");
-    const pindah = tuj.pid !== pid;
-    if (pindah) {
-        M = bulatStok(parseFloat(document.getElementById('k-pindah').value) || 0);
-        if (M <= 0) return alert("Jumlah dipindah harus lebih dari 0!");
-        if (M > bulatStok(S)) return alert(`Jumlah dipindah (${M}) melebihi stok sebenarnya (${bulatStok(S)})!`);
+    let html = renderHeaderWS("RAP Belanja", "RAP_Belanja");
+    html += `<div class="flex flex-wrap items-center gap-3 mb-3 no-print"><label for="rb-filter" class="text-sm font-semibold text-gray-600"><i class="fas fa-filter mr-1"></i>Filter stok:</label><select id="rb-filter" onchange="ubahFilterBelanja()" class="border p-2 rounded text-sm bg-white">${Object.keys(FILTER_BELANJA).map(k => `<option value="${k}"${k === rbFilter ? ' selected' : ''}>${FILTER_BELANJA[k]} (${jumlah[k]})</option>`).join('')}</select></div>`;
+    if (activeWorkspaceData.belanjaMaterial) {   // progres kerja Purchasing: dari material yang perlu dibeli
+        const perluBeli = semua.filter(b => b.sb.kode !== 'tidak'), sdh = perluBeli.filter(b => b.sb.kode === 'sudah').length, pct = perluBeli.length ? Math.round(sdh / perluBeli.length * 100) : 100;
+        html += `<div id="progres-belanja" class="mb-3 no-print"><div class="flex justify-between text-sm mb-1"><span class="font-semibold text-gray-700"><i class="fas fa-shopping-cart mr-1"></i>Progres belanja: <span class="jml-sudah">${sdh}</span> dari <span class="jml-perlu">${perluBeli.length}</span> material sudah dibeli</span><span class="text-gray-500">${pct}%</span></div><div class="w-full bg-gray-200 rounded h-2"><div class="bg-green-500 h-2 rounded" style="width:${pct}%"></div></div></div>`;
     }
-    const S0 = bulatStok(k.Stok), A = k.Harga;
-    const kat = pid ? 'Koreksi Alokasi' : 'Penyesuaian';
-    const tgl = tglLokalStok(), baris = [];
-    const tambah = (jenis, qty, harga, kategori, proj, keterangan) => { qty = bulatStok(qty); harga = bulatStok(harga); if (qty > 0) baris.push(["STK-" + (Date.now() + baris.length), tgl, nama, jenis, kategori, proj, jenis === 'Masuk' ? qty : 0, jenis === 'Keluar' ? qty : 0, sat, harga, qty * harga, keterangan]); };
-    // 1) koreksi stok/harga pada kolam asal
-    if (S0 > 0 && Math.abs(P - A) < 1) {
-        if (S > S0) tambah('Masuk', S - S0, A, `${kat} (Masuk)`, pid, ref); else if (S < S0) tambah('Keluar', S0 - S, A, `${kat} (Keluar)`, pid, ref);
-    } else if (S !== S0 || Math.abs(P - A) >= 1) {
-        if (S0 > 0) tambah('Keluar', S0, A, `${kat} (Keluar)`, pid, ref);
-        tambah('Masuk', S - (S0 > 0 ? 0 : S0), P, `${kat} (Masuk)`, pid, ref);
-    }
-    // 2) pindah alokasi: keluar dari kolam asal, masuk ke kolam tujuan
-    let tujuanNama = '';
-    if (pindah) {
-        tujuanNama = tuj.pid ? 'Alokasi ' + labelProjectStok(tuj.pid) : 'Stok Umum';
-        const h = S > 0 ? P : A, ket = `Dipindah dari ${namaKolamStok(k)} ke ${tujuanNama}`;
-        tambah('Keluar', M, h, 'Pindah Alokasi (Keluar)', pid, ket);
-        tambah('Masuk', M, h, 'Pindah Alokasi (Masuk)', tuj.pid, ket);
-    }
-    if (baris.length === 0) return alert("Tidak ada perubahan stok, harga, atau alokasi.");
-    showLoading("Menyimpan Perubahan...");
-    for (const r of baris) {
-        const res = await apiSaveMaster('Data_Kartu_Stok', r);
-        if (!res.success) { hideLoading(); alert(res.message); return renderStokData(); }
-    }
-    renderStokData(pindah ? `${M} ${sat} ${nama} dipindah dari ${namaKolamStok(k)} ke ${tujuanNama}.` : `Koreksi ${nama} (${namaKolamStok(k)}) tersimpan: ${baris.length} transaksi penyesuaian.`);
-}
-
-// Hapus item stok = hapus seluruh baris transaksi item itu di Data_Kartu_Stok (semua kolam; dari bawah ke atas agar nomor baris tetap benar).
-async function hapusStok(idx) {
-    const k = gudangKolam[idx]; if (!k) return;
-    const nama = k.Nama_Item, rows = gudangLogs.filter(l => (l.Nama_Material || l.Nama_Item) === nama);
-    const pakai = rows.filter(l => parseFloat(l.Qty_Keluar) > 0 && l.Project_ID && String(l.Kategori_Alokasi).indexOf('Dipakai Project') === 0).length;
-    const alok = gudangKolam.filter(x => x.Nama_Item === nama && x.Kolam === 'Project').length;
-    if (!confirm(`Hapus item "${nama}" dari stok?\n\nSeluruh stok item ini (stok umum${alok ? ' dan ' + alok + ' alokasi project' : ''}) hilang: ${rows.length} baris riwayat terhapus permanen.${pakai ? `\n${pakai} transaksi pemakaian project ikut terhapus dan akan mengubah biaya material project tersebut.` : ''}\n\nTidak bisa dibatalkan.`)) return;
-    showLoading("Menghapus item stok...");
-    for (const r of rows.slice().sort((a, b) => b.rowIndex - a.rowIndex)) {
-        const res = await apiDeleteMaster('Data_Kartu_Stok', r.rowIndex);
-        if (!res.success) { hideLoading(); alert(res.message); return renderStokData(); }
-    }
-    renderStokData(`Item ${nama} dihapus dari stok.`);
-}
-
-function renderTabelStokLog() {
-    const data = gudangLogs.filter(l => !stokCari || String(l.Nama_Material || l.Nama_Item || '').toLowerCase().includes(stokCari));
-    let h = `<div class="max-h-96 overflow-y-auto"><table class="min-w-full text-left text-sm"><thead><tr class="bg-gray-800 text-white"><th class="p-2">Tgl</th><th class="p-2">Keterangan</th><th class="p-2">Material</th><th class="p-2 text-right">Harga</th><th class="p-2 text-center">In</th><th class="p-2 text-center">Out</th></tr></thead><tbody>`;
-    if (data.length === 0) h += `<tr><td colspan="6" class="p-4 text-center italic text-gray-500">Belum ada riwayat.</td></tr>`;
-    data.forEach(l => {
-        let col = parseFloat(l.Qty_Masuk) > 0 ? "text-green-600" : "text-red-600";
-        h += `<tr class="border-b hover:bg-gray-50"><td class="p-2 text-gray-500">${escStok((l.Tanggal||'').split('T')[0])}</td><td class="p-2 font-semibold ${col} text-xs uppercase">${escStok(l.Kategori_Alokasi)} <div class="text-gray-500 font-normal">Ref: ${escStok(l.Project_ID !== "" ? l.Project_ID : (l.Referensi||'-'))}</div></td><td class="p-2 font-medium">${escStok(l.Nama_Material || l.Nama_Item)}</td><td class="p-2 text-right text-gray-600">Rp ${(parseFloat(l.Harga_Satuan)||0).toLocaleString('id-ID')}</td><td class="p-2 text-center text-green-600 font-bold bg-green-50">${parseFloat(l.Qty_Masuk)>0?escStok(l.Qty_Masuk):'-'}</td><td class="p-2 text-center text-red-600 font-bold bg-red-50">${parseFloat(l.Qty_Keluar)>0?escStok(l.Qty_Keluar):'-'}</td></tr>`;
-    });
-    document.getElementById('area-log').innerHTML = h + `</tbody></table></div>`;
-}
-
-function switchTabStok(t) {
-    const on = "w-1/3 py-3 text-center tab-active transition", off = "w-1/3 py-3 text-center tab-inactive transition hover:bg-gray-50";
-    ['stok', 'rekap', 'log'].forEach(n => { document.getElementById('t-' + n).className = t === n ? on : off; document.getElementById('area-' + n).style.display = t === n ? 'block' : 'none'; });
-}
-
-// ---- Rekap per Alokasi: Stok Umum dan tiap project; jumlah barang masuk (belanja) + sisa stok, dengan detail barang ----
-// "Total Barang Masuk" project = angka yang sama dengan kolom Alokasi Stok di Daftar Project (hanya pembelian, bukan pindah/koreksi).
-function rekapAlokasiStok() {
-    const grup = {}, urut = [];
-    const ambil = pid => { const k = pid || ''; if (!grup[k]) { grup[k] = { pid: k, masuk: 0, sisa: 0, item: {} }; urut.push(k); } return grup[k]; };
-    const ambilItem = (g, nama, sat) => g.item[nama] || (g.item[nama] = { nama, satuan: sat, qtyMasuk: 0, nilaiMasuk: 0, qtyPindah: 0, nilaiPindah: 0, stok: 0, nilaiStok: 0 });
-    gudangLogs.forEach(l => {
-        const pid = String(l.Project_ID || '').trim(), kat = String(l.Kategori_Alokasi || '');
-        const beli = (parseFloat(l.Qty_Masuk) || 0) > 0 && (pid ? kat.indexOf('Pembelian Project') === 0 : kat.indexOf('Pembelian Umum') === 0);
-        if (!beli) {   // barang pindahan masuk (Pindah Alokasi): ikut tampil di Qty/Nilai Masuk barisnya, tapi tidak dihitung sebagai belanja baru
-            if ((parseFloat(l.Qty_Masuk) || 0) > 0 && kat.indexOf('Pindah Alokasi') === 0) { const gp = ambil(pid), ip = ambilItem(gp, l.Nama_Material || l.Nama_Item, l.Satuan); ip.qtyPindah += parseFloat(l.Qty_Masuk) || 0; ip.nilaiPindah += parseFloat(l.Total_Nilai) || 0; }
-            return;
-        }
-        const g = ambil(pid), it = ambilItem(g, l.Nama_Material || l.Nama_Item, l.Satuan), nilai = parseFloat(l.Total_Nilai) || 0;
-        g.masuk += nilai; it.qtyMasuk += parseFloat(l.Qty_Masuk) || 0; it.nilaiMasuk += nilai;
-    });
-    gudangKolam.forEach(k => {
-        const pid = k.Kolam === 'Project' ? k.Project_ID : '';
-        if (!(Math.abs(k.Stok) > 0.00005) && !(Math.abs(k.Nilai) > 0.005) && !(grup[pid] && grup[pid].item[k.Nama_Item])) return;
-        const g = ambil(pid), it = ambilItem(g, k.Nama_Item, k.Satuan);
-        it.stok += k.Stok; it.nilaiStok += k.Nilai; g.sisa += k.Nilai;
-    });
-    Object.keys(grup).forEach(k => Object.keys(grup[k].item).forEach(n => { const it = grup[k].item[n]; it.qtyMasuk += it.qtyPindah; it.nilaiMasuk += it.nilaiPindah; }));   // g.masuk (belanja) tidak ikut berubah
-    ambil('');   // Stok Umum selalu ada
-    const proj = currentProjectData.map(p => p.Project_ID), kunci = urut.filter(k => k !== '').sort((a, b) => (proj.indexOf(a) + 1 || 9999) - (proj.indexOf(b) + 1 || 9999));
-    return [grup['']].concat(kunci.map(k => grup[k]));
-}
-let _rekapSemua = [];
-function renderRekapAlokasi() {
-    const area = document.getElementById('area-rekap'); if (!area) return;
-    const semua = _rekapSemua = rekapAlokasiStok(), kw = stokCari || '';
-    let tMasuk = 0, tSisa = 0; semua.forEach(g => { tMasuk += g.masuk; tSisa += g.sisa; });
-    let h = `<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4"><div class="bg-green-50 border border-green-200 rounded p-3"><div class="text-xs text-green-700 font-semibold uppercase">Total Barang Masuk (Belanja)</div><div id="rekap-total-masuk" class="text-lg font-bold text-green-900">${rpStok(tMasuk)}</div></div><div class="bg-indigo-50 border border-indigo-200 rounded p-3"><div class="text-xs text-indigo-600 font-semibold uppercase">Sisa Stok Saat Ini</div><div id="rekap-total-sisa" class="text-lg font-bold text-indigo-900">${rpStok(tSisa)}</div></div><div class="bg-gray-50 border rounded p-3 text-xs text-gray-500">Barang Masuk = total pembelian yang pernah dicatat. Sisa Stok = yang masih ada di gudang. Klik Detail untuk melihat daftar barang per alokasi (bisa dicari dan dicetak).</div></div>`;
-    let ada = 0;
-    h += `<div class="border rounded divide-y overflow-hidden">`;
-    semua.forEach((g, idx) => {
-        const label = g.pid === '' ? 'Stok Umum' : labelProjectStok(g.pid);
-        if (kw && label.toLowerCase().indexOf(kw) === -1 && !Object.keys(g.item).some(n => n.toLowerCase().indexOf(kw) !== -1)) return;
-        ada++;
-        const badge = g.pid === '' ? `<span class="inline-block bg-green-100 text-green-800 text-xs font-semibold px-2 py-0.5 rounded">Stok Umum</span>` : `<span class="font-bold text-indigo-900"><i class="fas fa-user-tag mr-1 text-indigo-400"></i>${escStok(label)}</span>`;
-        h += `<div class="rekap-grup flex flex-wrap items-center gap-x-6 gap-y-1 px-3 py-2 hover:bg-indigo-50"><span class="flex-1 min-w-0 cursor-pointer" onclick="detailRekapAlokasi(${idx})">${badge} <span class="text-xs text-gray-400 ml-2">${Object.keys(g.item).length} barang</span></span><span class="text-sm text-gray-600">Barang Masuk: <b class="text-green-700 rekap-masuk">${rpStok(g.masuk)}</b></span><span class="text-sm text-gray-600">Sisa Stok: <b class="text-indigo-700 rekap-sisa">${rpStok(g.sisa)}</b></span><button onclick="detailRekapAlokasi(${idx})" title="Lihat detail barang alokasi ini" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3 py-1.5 rounded shadow whitespace-nowrap"><i class="fas fa-list mr-1"></i>Detail</button></div>`;
-    });
-    h += `</div>`;
-    if (!ada) h = h.replace(/<div class="border rounded divide-y overflow-hidden"><\/div>$/, '') + `<div class="p-4 text-center italic text-gray-500">Tidak ada alokasi yang cocok.</div>`;
-    area.innerHTML = h;
-}
-
-// Halaman detail satu alokasi (Stok Umum / satu project): daftar barang yang masuk + sisa stok, dengan pencarian material. Tombol Cetak -> "Simpan sebagai PDF".
-// Pencarian material di halaman detail alokasi (hanya menyaring tampilan; baris TOTAL tetap seluruh alokasi).
-function filterDetailRekap() {
-    const kw = (document.getElementById('rekap-cari').value || '').trim().toLowerCase(), baris = [...document.querySelectorAll('.baris-rekap')]; let n = 0, m = 0, sisa = 0, tersembunyi = 0;
-    baris.forEach((tr, i) => {
-        const nol = !(parseFloat(tr.getAttribute('data-stok')) > 0.00005);
-        const cocok = kw ? tr.getAttribute('data-nama').indexOf(kw) !== -1 : !(_rekapSembunyi && nol);   // pencarian selalu menemukan barang, termasuk yang stoknya 0
-        if (!cocok && !kw && nol) tersembunyi++;
-        tr.style.display = cocok ? '' : 'none'; const sub = document.getElementById('trx-baris-' + i); if (sub) sub.style.display = cocok ? '' : 'none';
-        if (cocok) { n++; m += parseFloat(tr.getAttribute('data-masuk')) || 0; sisa += parseFloat(tr.getAttribute('data-sisa')) || 0; }
-    });
-    document.getElementById('rekap-info').innerText = (kw || tersembunyi) ? `${n} dari ${baris.length} barang` : `${baris.length} barang`;
-    document.getElementById('rekap-hasil').classList.toggle('hidden', !kw || n === 0);
-    document.getElementById('rekap-hasil-n').innerText = `${n} barang`; document.getElementById('rekap-hasil-masuk').innerText = rpStok(m); document.getElementById('rekap-hasil-sisa').innerText = rpStok(sisa);
-    document.getElementById('rekap-kosong').classList.toggle('hidden', !(kw && n === 0));
-    document.getElementById('rekap-catatan').innerText = tersembunyi ? `${tersembunyi} barang dengan stok 0 disembunyikan (nilainya tetap dihitung di baris TOTAL).` : '';
-}
-// ---- Transaksi per barang di halaman detail alokasi: ubah / hapus baris Kartu Stok ----
-const _KAT_KUNCI_REKAP = 'Pindah Alokasi';   // transaksi pindah selalu berpasangan (keluar + masuk), tidak diubah di sini
-function trxBarangRekap(g, nama) { return gudangLogs.filter(l => String(l.Project_ID || '').trim() === g.pid && String(l.Nama_Material || l.Nama_Item || '') === String(nama)); }
-function tabelTrxRekap(g, i) {
-    const trx = trxBarangRekap(g, i.nama);
-    if (!trx.length) return `<p class="text-sm italic text-gray-500">Tidak ada transaksi.</p>`;
-    let h = `<table class="w-full text-xs"><thead><tr class="text-gray-500 uppercase border-b"><th class="p-1.5 text-left">Tanggal</th><th class="p-1.5 text-left">Jenis</th><th class="p-1.5 text-left">Kategori</th><th class="p-1.5 text-center">Qty</th><th class="p-1.5 text-right">Harga</th><th class="p-1.5 text-right">Nilai</th><th class="p-1.5 text-center">Aksi</th></tr></thead><tbody>`;
-    trx.forEach(l => {
-        const masuk = (parseFloat(l.Qty_Masuk) || 0) > 0, qty = masuk ? parseFloat(l.Qty_Masuk) : parseFloat(l.Qty_Keluar) || 0, kunci = String(l.Kategori_Alokasi || '').indexOf(_KAT_KUNCI_REKAP) === 0;
-        h += `<tr class="border-b"><td class="p-1.5 whitespace-nowrap">${escStok(String(l.Tanggal || '').split('T')[0].split('-').reverse().join('-'))}</td><td class="p-1.5 ${masuk ? 'text-green-600' : 'text-red-500'} font-semibold">${masuk ? 'Masuk' : 'Keluar'}</td><td class="p-1.5">${escStok(l.Kategori_Alokasi || '-')}</td><td class="p-1.5 text-center">${bulatStok(qty)}</td><td class="p-1.5 text-right">${rpStok(parseFloat(l.Harga_Satuan) || 0)}</td><td class="p-1.5 text-right">${rpStok(parseFloat(l.Total_Nilai) || 0)}</td><td class="p-1.5 text-center whitespace-nowrap">${kunci ? `<span class="text-gray-400" title="Transaksi pindah alokasi tidak dapat diubah di sini"><i class="fas fa-lock"></i></span>` : `<button onclick="bukaEditTrxRekap(${l.rowIndex})" title="Edit" class="text-blue-500 mx-1"><i class="fas fa-edit"></i></button><button onclick="hapusTrxRekap(${l.rowIndex})" title="Hapus" class="text-red-500 mx-1"><i class="fas fa-trash"></i></button>`}</td></tr>`;
-    });
-    return h + `</tbody></table>`;
-}
-function toggleTrxRekap(n) {
-    const sub = document.getElementById('trx-baris-' + n), ikon = document.getElementById('trx-ikon-' + n); if (!sub) return;
-    const buka = sub.classList.toggle('hidden') === false; ikon.className = 'fas text-xs ' + (buka ? 'fa-chevron-down' : 'fa-chevron-right');
-}
-function cariTrxRekap(rIdx) { return gudangLogs.find(l => l.rowIndex == rIdx); }
-// Stok yang masih ada untuk satu barang di alokasi yang sedang dibuka (batas pengurangan Qty masuk / penambahan Qty keluar).
-function stokSisaRekap(nama) { const k = gudangKolam.find(x => x.Nama_Item === nama && (x.Kolam === 'Project' ? x.Project_ID === _rekapPid : _rekapPid === '')); return k ? k.Stok : 0; }
-function barisDariTrx(l, qty, harga, tanggal) {
-    const masuk = (parseFloat(l.Qty_Masuk) || 0) > 0, total = Math.round(qty * harga * 100) / 100;
-    return [l.Log_ID, tanggal, l.Nama_Material || l.Nama_Item, l.Jenis_Transaksi, l.Kategori_Alokasi, l.Project_ID, masuk ? qty : 0, masuk ? 0 : qty, l.Satuan, harga, total, l.Referensi];
-}
-function pastikanModalTrxRekap() {
-    if (document.getElementById('modal-trx-rekap')) return;
-    document.body.insertAdjacentHTML('beforeend', `<div id="modal-trx-rekap" class="fixed inset-0 bg-black bg-opacity-50 hidden justify-center items-center z-50 no-print"><div class="bg-white p-6 rounded shadow w-96">
-        <h3 class="font-bold mb-1">Edit Transaksi</h3><p id="tr-info" class="text-sm text-gray-600 mb-3"></p><input type="hidden" id="tr-rowIndex">
-        <label class="text-xs text-gray-500">Tanggal</label><input type="date" id="tr-tanggal" class="w-full border p-2 mb-2">
-        <label class="text-xs text-gray-500">Qty</label><input type="number" step="any" id="tr-qty" class="w-full border p-2 mb-2" oninput="hitungTotalTrxRekap()">
-        <label class="text-xs text-gray-500">Harga satuan (Rp)</label><input type="number" id="tr-harga" class="w-full border p-2 mb-2" oninput="hitungTotalTrxRekap()">
-        <p class="text-xs text-gray-500 mb-3">Total nilai: <b id="tr-total">Rp 0</b></p>
-        <p class="text-xs text-amber-700 mb-4">Perubahan ini mempengaruhi stok, Alokasi Stok di Daftar Project, dan (untuk barang keluar) biaya material RAP Final.</p>
-        <div class="flex justify-end gap-2"><button onclick="closeModal('modal-trx-rekap')" class="bg-gray-400 text-white px-3 py-1 rounded">Batal</button><button onclick="simpanTrxRekap()" class="bg-blue-600 text-white px-4 py-1.5 rounded font-bold shadow">Simpan</button></div></div></div>`);
-}
-function hitungTotalTrxRekap() { document.getElementById('tr-total').innerText = rpStok((parseFloat(document.getElementById('tr-qty').value) || 0) * (parseFloat(document.getElementById('tr-harga').value) || 0)); }
-function bukaEditTrxRekap(rIdx) {
-    const l = cariTrxRekap(rIdx); if (!l) return alert('Transaksi tidak ditemukan. Muat ulang menu ini.');
-    pastikanModalTrxRekap(); const masuk = (parseFloat(l.Qty_Masuk) || 0) > 0;
-    document.getElementById('tr-rowIndex').value = rIdx; document.getElementById('tr-info').innerText = `${l.Nama_Material || l.Nama_Item} · ${masuk ? 'Masuk' : 'Keluar'} · ${l.Kategori_Alokasi || ''}`;
-    document.getElementById('tr-tanggal').value = String(l.Tanggal || '').split('T')[0]; document.getElementById('tr-qty').value = masuk ? parseFloat(l.Qty_Masuk) : parseFloat(l.Qty_Keluar); document.getElementById('tr-harga').value = parseFloat(l.Harga_Satuan) || 0;
-    hitungTotalTrxRekap(); document.getElementById('modal-trx-rekap').style.display = 'flex';
-}
-async function segarkanDetailRekap(notice) {
-    const pid = _rekapPid; await renderStokData(); switchTabStok('rekap');
-    const idx = _rekapSemua.findIndex(g => g.pid === pid); if (idx >= 0) detailRekapAlokasi(idx, notice); else { const a = document.getElementById('area-rekap'); if (a && notice) a.insertAdjacentHTML('afterbegin', `<div class="bg-green-50 border border-green-300 text-green-800 text-sm p-3 rounded mb-3"><i class="fas fa-check-circle mr-2"></i>${escStok(notice)}</div>`); }
-}
-async function simpanTrxRekap() {
-    const rIdx = document.getElementById('tr-rowIndex').value, l = cariTrxRekap(rIdx); if (!l) return alert('Transaksi tidak ditemukan. Muat ulang menu ini.');
-    const qty = Math.round((parseFloat(document.getElementById('tr-qty').value) || 0) * 10000) / 10000, harga = parseFloat(document.getElementById('tr-harga').value), tgl = document.getElementById('tr-tanggal').value;
-    if (qty <= 0) return alert('Qty harus lebih dari 0! Untuk membatalkan transaksi, gunakan tombol hapus.'); if (isNaN(harga) || harga < 0) return alert('Harga tidak valid!'); if (!tgl) return alert('Tanggal wajib diisi!');
-    const masuk = (parseFloat(l.Qty_Masuk) || 0) > 0, lama = masuk ? parseFloat(l.Qty_Masuk) : parseFloat(l.Qty_Keluar) || 0, nama = l.Nama_Material || l.Nama_Item, sisa = stokSisaRekap(nama);
-    if (masuk && lama - qty > sisa + 0.00005) return alert(`Qty masuk tidak bisa dikurangi ${Math.round((lama - qty) * 10000) / 10000}: stok yang tersisa hanya ${bulatStok(sisa)} (sisanya sudah keluar/dipakai). Ubah dulu transaksi keluarnya.`);
-    if (!masuk && qty - lama > sisa + 0.00005) return alert(`Stok tidak cukup. Qty keluar ditambah ${Math.round((qty - lama) * 10000) / 10000}, stok tersisa hanya ${bulatStok(sisa)}.`);
-    showLoading('Memperbarui Transaksi...');
-    const res = await apiUpdateMaster('Data_Kartu_Stok', rIdx, barisDariTrx(l, qty, harga, tgl));
-    if (res.success) { closeModal('modal-trx-rekap'); await segarkanDetailRekap(`Transaksi ${nama} diperbarui.`); } else { hideLoading(); alert(res.message); }
-}
-async function hapusTrxRekap(rIdx) {
-    const l = cariTrxRekap(rIdx); if (!l) return alert('Transaksi tidak ditemukan. Muat ulang menu ini.');
-    const masuk = (parseFloat(l.Qty_Masuk) || 0) > 0, qty = masuk ? parseFloat(l.Qty_Masuk) : parseFloat(l.Qty_Keluar) || 0, nama = l.Nama_Material || l.Nama_Item, sisa = stokSisaRekap(nama);
-    if (masuk && qty > sisa + 0.00005) return alert(`Transaksi masuk ini tidak bisa dihapus: ${bulatStok(qty)} ${l.Satuan || ''} masuk, tetapi stok yang tersisa hanya ${bulatStok(sisa)} (sisanya sudah keluar/dipakai). Hapus atau ubah dulu transaksi keluarnya.`);
-    if (!confirm(`Hapus transaksi ${masuk ? 'MASUK' : 'KELUAR'} ${nama} (${bulatStok(qty)} ${l.Satuan || ''}, ${l.Kategori_Alokasi || ''})?\n\nIni mengubah stok, Alokasi Stok di Daftar Project${masuk ? '' : ', dan biaya material di RAP Final'}.`)) return;
-    showLoading('Menghapus Transaksi...');
-    const res = await apiDeleteMaster('Data_Kartu_Stok', rIdx);
-    if (res.success) await segarkanDetailRekap(`Transaksi ${nama} dihapus.`); else { hideLoading(); alert(res.message); }
-}
-async function kembaliKeRekapStok() { await renderStokData(); switchTabStok('rekap'); }
-let _rekapPid = '', _rekapSembunyi = true;   // alokasi yang sedang dibuka; sembunyikan barang stok 0 (default)
-function detailRekapAlokasi(idx, notice) {
-    const g = _rekapSemua[idx]; if (!g) return alert('Data alokasi tidak ditemukan. Muat ulang menu Data Stok.');
-    _rekapPid = g.pid;
-    const umum = g.pid === '', p = umum ? null : currentProjectData.find(x => x.Project_ID === g.pid);
-    const items = Object.keys(g.item).map(n => g.item[n]);
-    let tQtyMasuk = 0; items.forEach(i => { tQtyMasuk += i.qtyMasuk; });
-    const info = (l, v) => `<tr><td class="py-0.5 pr-3 text-gray-600 align-top whitespace-nowrap">${l}</td><td class="py-0.5 pr-2 align-top">:</td><td class="py-0.5 font-semibold">${escStok(v) || '-'}</td></tr>`;
-    const baris = items.length === 0 ? `<tr><td colspan="7" class="p-3 border text-center italic text-gray-500">Belum ada barang.</td></tr>` : items.map((i, n) => `<tr class="baris-rekap" data-nama="${escStok(String(i.nama || '').toLowerCase())}" data-masuk="${i.nilaiMasuk}" data-sisa="${i.nilaiStok}" data-stok="${i.stok}"><td class="p-2 border text-center">${n + 1}</td><td class="p-2 border"><button onclick="toggleTrxRekap(${n})" class="no-print text-indigo-500 mr-1" title="Lihat / ubah transaksi barang ini"><i id="trx-ikon-${n}" class="fas fa-chevron-right text-xs"></i></button>${escStok(i.nama)}</td><td class="p-2 border text-center">${escStok(i.satuan || '-')}</td><td class="p-2 border text-center">${bulatStok(i.qtyMasuk)}${i.qtyPindah > 0 ? `<div class="text-[10px] text-gray-500 leading-tight">termasuk ${bulatStok(i.qtyPindah)} pindahan</div>` : ''}</td><td class="p-2 border text-right">${rpStok(i.nilaiMasuk)}</td><td class="p-2 border text-center">${bulatStok(i.stok)}</td><td class="p-2 border text-right">${rpStok(i.nilaiStok)}</td></tr><tr class="baris-rekap-trx hidden no-print" id="trx-baris-${n}"><td colspan="7" class="p-3 border bg-gray-50">${tabelTrxRekap(g, i)}</td></tr>`).join('');
-    const ttd = j => `<div class="text-center"><p class="font-semibold mb-20">${j}</p><div class="border-t border-gray-800 pt-2 text-left"><p>Nama : ..............................</p></div></div>`;
-    document.getElementById('main-content').innerHTML = `<div class="flex justify-between items-center mb-4 no-print"><button onclick="kembaliKeRekapStok()" class="bg-gray-500 text-white px-4 py-2 rounded"><i class="fas fa-arrow-left mr-2"></i>Kembali</button><button onclick="window.print()" class="bg-green-600 text-white px-4 py-2 rounded"><i class="fas fa-print mr-2"></i>Cetak / Simpan PDF</button></div>
-    ${notice ? `<div class="bg-green-50 border border-green-300 text-green-800 text-sm p-3 rounded mb-3 no-print"><i class="fas fa-check-circle mr-2"></i>${escStok(notice)}</div>` : ''}
-    <div class="flex flex-wrap items-center justify-between gap-2 mb-3 no-print"><span id="rekap-info" class="text-sm text-gray-500">${items.length} barang</span><label class="text-sm text-gray-600 flex items-center gap-2 cursor-pointer"><input type="checkbox" id="rekap-sembunyi" onchange="_rekapSembunyi = this.checked; filterDetailRekap()" ${_rekapSembunyi ? 'checked' : ''}> Sembunyikan barang stok 0</label><div class="relative"><i class="fas fa-search absolute left-3 top-2.5 text-gray-400 text-sm"></i><input type="text" id="rekap-cari" onkeyup="filterDetailRekap()" placeholder="Cari material di alokasi ini..." class="pl-9 border p-1.5 rounded w-64 text-sm focus:outline-indigo-500"></div></div>
-    <div class="print-area bg-white p-8 rounded-lg shadow-lg">
-        <div class="text-center mb-6"><h2 class="text-2xl font-bold uppercase tracking-wide">Rekap Alokasi Stok</h2><p class="text-sm text-gray-600 mt-1">${umum ? 'Stok Umum' : 'Alokasi Project'}</p></div>
-        <div class="grid grid-cols-2 gap-6 text-sm mb-6"><table><tbody>${umum ? info('Alokasi', 'Stok Umum (dipakai semua project)') : info('Klien', p ? p.Nama_PIC_Klien : '') + info('Project', p ? p.Nama_Project : g.pid) + info('ID Project', g.pid) + info('Alamat', p ? p.Alamat_Project : '')}</tbody></table><table><tbody>${info('Tanggal Cetak', tglLokalStok().split('-').reverse().join('-'))}${info('Jumlah Barang', String(items.length))}</tbody></table></div>
-        <table class="w-full text-sm border-collapse mb-4"><thead><tr class="bg-gray-100"><th class="p-2 border w-10">No</th><th class="p-2 border text-left">Nama Barang</th><th class="p-2 border">Satuan</th><th class="p-2 border">Qty Masuk</th><th class="p-2 border text-right">Nilai Masuk</th><th class="p-2 border">Sisa Stok</th><th class="p-2 border text-right">Nilai Sisa</th></tr></thead><tbody>${baris}</tbody>
-        <tfoot><tr id="rekap-hasil" class="hidden no-print bg-indigo-50 text-indigo-700 font-semibold"><td colspan="4" class="p-2 border text-right">Subtotal hasil pencarian (<span id="rekap-hasil-n"></span>)</td><td class="p-2 border text-right" id="rekap-hasil-masuk"></td><td class="p-2 border"></td><td class="p-2 border text-right" id="rekap-hasil-sisa"></td></tr><tr id="rekap-kosong" class="hidden no-print"><td colspan="7" class="p-3 border text-center italic text-gray-500">Tidak ada material yang cocok.</td></tr><tr class="bg-gray-50 font-bold"><td colspan="3" class="p-2 border text-right">TOTAL</td><td class="p-2 border text-center">${bulatStok(tQtyMasuk)}</td><td class="p-2 border text-right rekap-cetak-masuk">${rpStok(items.reduce((t, i) => t + i.nilaiMasuk, 0))}</td><td class="p-2 border"></td><td class="p-2 border text-right rekap-cetak-sisa">${rpStok(g.sisa)}</td></tr></tfoot></table>
-        <p id="rekap-catatan" class="text-xs text-amber-700 mb-2"></p>
-        <p class="text-xs text-gray-500 mb-2">Nilai Masuk = total pembelian yang dialokasikan${umum ? ' ke stok umum' : ' ke project ini'} ditambah barang pindahan dari alokasi lain (tidak dihitung sebagai belanja baru di daftar rekap). Sisa Stok = yang masih ada di gudang saat dicetak.</p>
-        <div class="mt-10 grid grid-cols-2 gap-8 text-sm" style="break-inside:avoid;page-break-inside:avoid">${ttd('Dibuat oleh')}${ttd('Mengetahui')}</div>
-    </div>`;
-    filterDetailRekap();
+    if (rbFilter !== 'semua') html += `<p class="text-sm text-gray-600 mb-2">Filter: <strong>${FILTER_BELANJA[rbFilter]}</strong>. Subtotal dan total hanya untuk material yang tampil.</p>`;
+    html += `<table class="w-full text-sm border-collapse mb-2"><thead><tr class="bg-gray-100 text-left"><th class="p-2 border">Material</th><th class="p-2 border">Supplier</th><th class="p-2 border text-center">Stok</th><th class="p-2 border text-center">Kebutuhan</th><th class="p-2 border text-center bg-red-600 text-white font-bold">QTY</th><th class="p-2 border text-center">Satuan</th><th class="p-2 border text-right">Harga</th><th class="p-2 border text-right">Total</th><th class="p-2 border text-center">Status Belanja</th><th class="p-2 border">Keterangan</th></tr></thead><tbody>${body}</tbody></table>`;
+    html += `<p class="text-xs text-gray-500 mb-4">Stok = alokasi project ini + stok umum. QTY = jumlah yang harus dibeli (Kebutuhan dikurangi Stok). Total = QTY x Harga satuan RAP Awal, belum termasuk premi. Stok umum bisa dipakai bersama project lain yang berjalan (tidak dikunci).</p>`;
+    html += `<div class="flex justify-end" style="break-inside:avoid"><div class="bg-gray-50 p-4 rounded border shadow-sm w-full md:w-1/2"><div class="flex justify-between font-bold text-lg text-indigo-900"><span>TOTAL BELANJA${rbFilter === 'semua' ? '' : ' (sesuai filter)'}:</span> <span>${rp(grand)}</span></div></div></div>`;
+    html += renderApprovalRap(['Kepala Produksi', 'Purchasing']);
+    document.getElementById('main-content').innerHTML = html + `</div>`;
 }
