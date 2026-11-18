@@ -145,6 +145,7 @@ async function sbWorkspace(pId) {
         rapAwal: semuaRapAwal.filter(r => r.Project_ID === pId),
         rapFinalManual: semuaFinal.filter(r => r.Project_ID === pId),
         stokMaterialFinal: stokUrut.filter(r => r.Project_ID === pId && pemakaianProject(r)),
+        belanjaMaterial: stokUrut.filter(r => r.Project_ID === pId && belanjaProject(r)).reduce((o, r) => { const n = r.Nama_Material || r.Nama_Item; o[n] = Math.round(((o[n] || 0) + (parseFloat(r.Qty_Masuk) || 0)) * 100) / 100; return o; }, {}),   // qty yang sudah dibeli (Barang Masuk 'Untuk Project') per material
         gudangStock: Object.keys(gudangMap).map(n => ({ Nama_Item: n, Total_Stok: gudangMap[n] })),
         stokProject: stokProject, pemakaiBersama: pemakaiBersama
     } };
