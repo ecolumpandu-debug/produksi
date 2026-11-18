@@ -168,7 +168,7 @@ async function sbTimelineBatch(pId, rows) {
 // Port persis dari Apps Script (hitungKolamStok_). rows harus berurutan dari lama ke baru.
 const KAT_LEPAS = 'Lepas Alokasi', KAT_PINDAH = 'Pindah Alokasi', KAT_KOREKSI_ALOKASI = 'Koreksi Alokasi';
 function awalKategori(row, awalan) { return String(row.Kategori_Alokasi || '').indexOf(awalan) === 0; }
-function hitungKolamStok(rows) {
+function hitungKolamStok(rows, kurang) {   // kurang (opsional): diisi baris pemakaian/penyesuaian yang saat dicatat stoknya belum cukup
     const items = {}, urutan = [];
     const kolamBaru = () => ({ q: 0, v: 0 });
     const kolamAlok = (it, pid) => { if (!it.alok[pid]) { it.alok[pid] = kolamBaru(); it.urutAlok.push(pid); } return it.alok[pid]; };
@@ -182,8 +182,8 @@ function hitungKolamStok(rows) {
             let sisa = qOut;
             const khusus = pid && (awalKategori(row, KAT_LEPAS) || awalKategori(row, KAT_PINDAH) || awalKategori(row, KAT_KOREKSI_ALOKASI));
             if (khusus) { const ka = kolamAlok(it, pid); sisa = ambil(ka, sisa); if (sisa > 0) ka.q -= sisa; }
-            else if (pid && awalKategori(row, KAT_PEMAKAIAN)) { sisa = ambil(kolamAlok(it, pid), sisa); sisa = ambil(it.umum, sisa); if (sisa > 0) it.umum.q -= sisa; }
-            else { sisa = ambil(it.umum, sisa); for (let i = 0; i < it.urutAlok.length && sisa > 0; i++) sisa = ambil(it.alok[it.urutAlok[i]], sisa); if (sisa > 0) it.umum.q -= sisa; }
+            else if (pid && awalKategori(row, KAT_PEMAKAIAN)) { sisa = ambil(kolamAlok(it, pid), sisa); sisa = ambil(it.umum, sisa); if (sisa > 0) { it.umum.q -= sisa; if (kurang) kurang.push(row); } }
+            else { sisa = ambil(it.umum, sisa); for (let i = 0; i < it.urutAlok.length && sisa > 0; i++) sisa = ambil(it.alok[it.urutAlok[i]], sisa); if (sisa > 0) { it.umum.q -= sisa; if (kurang) kurang.push(row); } }
         }
     });
     const bulat = n => Math.round(n * 10000) / 10000;
