@@ -219,6 +219,27 @@ async function simpanTransaksiStok() {
     else { hideLoading(); alert(res.message); }
 }
 
+// Transaksi keluar (pemakaian RAP Final / penyesuaian keluar) yang saat dicatat stoknya belum cukup (tercatat sebelum barang masuknya).
+function pemakaianPerluRapikan() {
+    const kurang = []; hitungKolamStok(gudangLogs.slice().reverse(), kurang);
+    return kurang.filter(l => String(l.Project_ID || '').trim() ? true : /^Penyesuaian/.test(String(l.Kategori_Alokasi || '')));
+}
+// Catat ulang transaksi tsb sebagai transaksi terbaru (tanggal, qty, harga tetap), lalu hapus baris lamanya. RAP Final tidak diubah.
+async function rapikanUrutanStok() {
+    const daftar = pemakaianPerluRapikan(); if (!daftar.length) return renderStokData('Tidak ada transaksi yang perlu dirapikan.');
+    if (!confirm(`Catat ulang ${daftar.length} transaksi keluar sebagai transaksi terbaru?\n\nJumlah, tanggal, harga, dan data RAP Final tidak berubah. Hanya urutan pencatatannya yang dipindah ke belakang barang masuk.`)) return;
+    showLoading('Merapikan urutan pencatatan...');
+    const stamp = Date.now(); let gagal = 0, baru = [];
+    for (let i = 0; i < daftar.length; i++) {
+        const l = daftar[i], row = ['STK-' + stamp + '-' + (i + 1), l.Tanggal, l.Nama_Material || l.Nama_Item, l.Jenis_Transaksi, l.Kategori_Alokasi, l.Project_ID, l.Qty_Masuk, l.Qty_Keluar, l.Satuan, l.Harga_Satuan, l.Total_Nilai, l.Referensi];
+        const res = await apiSaveMaster('Data_Kartu_Stok', row); if (res.success) baru.push(l); else gagal++;
+    }
+    for (const l of baru) { const d = await apiDeleteMaster('Data_Kartu_Stok', l.rowIndex); if (!d.success) gagal++; }
+    bersihkanCacheGudang(); hideLoading();
+    if (gagal) alert(`${gagal} langkah gagal. Buka Riwayat Barang dan periksa kemungkinan transaksi ganda sebelum mencoba lagi.`);
+    await renderStokData(`${baru.length} transaksi keluar dirapikan urutannya.`);
+}
+
 // ------------------------- DATA STOK (stok aktual + riwayat) -------------------------
 // Stok aktual ditampilkan per kolam: baris "Stok Umum" dan baris "Alokasi Project" untuk tiap material.
 async function renderStokData(notice) {
@@ -227,7 +248,8 @@ async function renderStokData(notice) {
     document.getElementById('header-title').innerText = 'Manajemen Stok';
     const sum = f => gudangKolam.filter(f).reduce((t, k) => t + k.Nilai, 0);
     const nUmum = sum(k => k.Kolam === 'Umum'), nAlok = sum(k => k.Kolam === 'Project');
-    document.getElementById('main-content').innerHTML = `${notice ? `<div class="bg-green-50 border border-green-300 text-green-800 text-sm p-3 rounded mb-4"><i class="fas fa-check-circle mr-2"></i>${escStok(notice)}</div>` : ''}<div id="panel-aksi-stok" class="hidden"></div><div class="bg-white rounded-lg shadow mb-6 flex flex-col"><div class="p-4 border-b flex flex-wrap justify-between items-center gap-3"><h2 class="text-xl font-bold text-gray-800"><i class="fas fa-warehouse text-indigo-600 mr-2"></i>Data Stok</h2><div class="flex flex-wrap items-center gap-3"><select id="filter-kolam-stok" onchange="ubahFilterKolamStok()" class="border p-2 rounded text-sm bg-white"><option value="semua">Semua stok</option><option value="umum">Stok Umum</option><option value="project">Alokasi Project</option></select><div class="relative"><i class="fas fa-search absolute left-3 top-2.5 text-gray-400"></i><input type="text" id="cari-stok" onkeyup="cariStok()" placeholder="Cari material / project..." class="pl-10 border p-2 rounded w-64 text-sm focus:outline-indigo-500"></div><div class="bg-indigo-50 border border-indigo-200 rounded px-4 py-1.5 text-right"><div class="text-xs text-indigo-600 font-semibold uppercase">Total Aset Stok</div><div id="total-aset-stok" class="text-lg font-bold text-indigo-900">${rpStok(nUmum + nAlok)}</div><div class="text-xs text-gray-500">Umum ${rpStok(nUmum)} &middot; Alokasi ${rpStok(nAlok)}</div></div></div></div><div class="flex border-b"><button onclick="switchTabStok('stok')" id="t-stok" class="w-1/3 py-3 tab-active transition">Stok Aktual</button><button onclick="switchTabStok('rekap')" id="t-rekap" class="w-1/3 py-3 tab-inactive transition hover:bg-gray-50">Rekap per Alokasi</button><button onclick="switchTabStok('log')" id="t-log" class="w-1/3 py-3 tab-inactive transition hover:bg-gray-50">Riwayat Barang (Masuk/Keluar)</button></div><div id="area-stok" class="p-4"></div><div id="area-rekap" class="p-4 hidden"></div><div id="area-log" class="p-4 hidden"></div></div>`;
+    const perlu = pemakaianPerluRapikan().length;
+    document.getElementById('main-content').innerHTML = `${notice ? `<div class="bg-green-50 border border-green-300 text-green-800 text-sm p-3 rounded mb-4"><i class="fas fa-check-circle mr-2"></i>${escStok(notice)}</div>` : ''}${perlu ? `<div id="banner-rapikan" class="bg-amber-50 border border-amber-300 text-amber-900 text-sm p-3 rounded mb-4 flex flex-wrap items-center justify-between gap-3"><div><i class="fas fa-exclamation-triangle mr-2"></i><b>${perlu} transaksi keluar</b> tercatat sebelum barang masuknya, sehingga stok umum/nilai stok bisa tidak sesuai. Jumlah, tanggal, dan nilai di RAP Final tidak berubah.</div><button id="btn-rapikan" onclick="rapikanUrutanStok()" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded font-semibold"><i class="fas fa-sort-amount-down mr-1"></i>Rapikan Urutan Pencatatan</button></div>` : ''}<div id="panel-aksi-stok" class="hidden"></div><div class="bg-white rounded-lg shadow mb-6 flex flex-col"><div class="p-4 border-b flex flex-wrap justify-between items-center gap-3"><h2 class="text-xl font-bold text-gray-800"><i class="fas fa-warehouse text-indigo-600 mr-2"></i>Data Stok</h2><div class="flex flex-wrap items-center gap-3"><select id="filter-kolam-stok" onchange="ubahFilterKolamStok()" class="border p-2 rounded text-sm bg-white"><option value="semua">Semua stok</option><option value="umum">Stok Umum</option><option value="project">Alokasi Project</option></select><div class="relative"><i class="fas fa-search absolute left-3 top-2.5 text-gray-400"></i><input type="text" id="cari-stok" onkeyup="cariStok()" placeholder="Cari material / project..." class="pl-10 border p-2 rounded w-64 text-sm focus:outline-indigo-500"></div><div class="bg-indigo-50 border border-indigo-200 rounded px-4 py-1.5 text-right"><div class="text-xs text-indigo-600 font-semibold uppercase">Total Aset Stok</div><div id="total-aset-stok" class="text-lg font-bold text-indigo-900">${rpStok(nUmum + nAlok)}</div><div class="text-xs text-gray-500">Umum ${rpStok(nUmum)} &middot; Alokasi ${rpStok(nAlok)}</div></div></div></div><div class="flex border-b"><button onclick="switchTabStok('stok')" id="t-stok" class="w-1/3 py-3 tab-active transition">Stok Aktual</button><button onclick="switchTabStok('rekap')" id="t-rekap" class="w-1/3 py-3 tab-inactive transition hover:bg-gray-50">Rekap per Alokasi</button><button onclick="switchTabStok('log')" id="t-log" class="w-1/3 py-3 tab-inactive transition hover:bg-gray-50">Riwayat Barang (Masuk/Keluar)</button></div><div id="area-stok" class="p-4"></div><div id="area-rekap" class="p-4 hidden"></div><div id="area-log" class="p-4 hidden"></div></div>`;
     renderTabelStokAktual(); renderRekapAlokasi(); renderTabelStokLog();
 }
 
