@@ -73,7 +73,7 @@ async function tampilFormStok(jenis, notice) {
             <label class="block text-sm text-gray-600 mb-1">Cari Nama Material</label>
             <input type="text" id="s-nama" onkeyup="liveSearchMaterialStok()" class="w-full border p-2 rounded focus:outline-indigo-500" placeholder="Ketik material..." autocomplete="off">
             <ul id="s-search-material" class="absolute z-50 w-full bg-white border border-gray-200 shadow-xl rounded max-h-40 overflow-y-auto hidden"></ul>
-            <div id="s-info-stok" class="text-xs text-gray-500 mt-1 h-4"></div>
+            <div id="s-info-stok" class="text-xs text-gray-500 mt-1 min-h-[1rem]"></div>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <div><label class="block text-sm text-gray-600 mb-1">Qty</label><input type="number" id="s-qty" class="w-full border p-2 rounded focus:outline-indigo-500" placeholder="0"></div>
@@ -108,9 +108,34 @@ function onChangeAlokasiStok() {
 }
 
 // Info stok di bawah kolom material, sesuai jenis transaksi, alokasi, dan project yang dipilih.
+// Rincian stok yang bisa dikeluarkan untuk pilihan saat ini (Barang Keluar). Null untuk Barang Masuk.
+function alokasiBelumPilihProject() { return document.getElementById('s-jenis').value === 'Keluar' && document.getElementById('s-alokasi').value.startsWith('Dipakai Project') && !document.getElementById('s-project-id').value; }
+function rincianStokKeluar(nama) {
+    const jenis = document.getElementById('s-jenis').value; if (jenis !== 'Keluar') return null;
+    const alok = document.getElementById('s-alokasi').value, pid = document.getElementById('s-project-id').value;
+    const u = Math.max(0, bulatStok(stokUmum(nama)));
+    if (alok.startsWith('Dipakai Project')) {
+        if (!pid) return { teks: `Umum ${u}`, total: u, perinci: `Umum ${u}` };
+        const a = Math.max(0, bulatStok(stokAlokasi(nama, pid))); return { teks: `Alokasi ${a} \u00b7 Umum ${u}`, total: bulatStok(a + u), perinci: `alokasi project ${a} + umum ${u}` };
+    }
+    return { teks: `Umum ${u}`, total: u, perinci: `umum ${u}` };
+}
+function labelStokPilihan(nama, sat) {
+    const d = rincianStokKeluar(nama); if (!d) return null;
+    return d.total > 0 ? { teks: `\u2014 ${d.teks} ${sat}`, kosong: false } : { teks: '\u2014 Stok kosong', kosong: true };
+}
 function perbaruiInfoStok() {
     const el = document.getElementById('s-info-stok'), nama = document.getElementById('s-nama').value; if (!el) return;
     const sat = document.getElementById('s-satuan').value, u = bulatStok(stokUmum(nama)), a = bulatStok(stokAlokasiSemua(nama));
+    el.className = 'text-xs text-gray-500 mt-1 min-h-[1rem]';
+    const dk = nama ? rincianStokKeluar(nama) : null;
+    if (dk) {   // Barang Keluar: kotak status stok yang jelas setelah material dipilih
+        const sat0 = document.getElementById('s-satuan').value;
+        if (dk.total > 0) { el.className = 'mt-1 p-2 rounded border border-emerald-300 bg-emerald-50 text-emerald-800 text-sm font-semibold'; el.textContent = `Stok tersedia: ${dk.total} ${sat0} (${dk.perinci})`; }
+        else { el.className = 'mt-1 p-2 rounded border border-red-300 bg-red-50 text-red-700 text-sm font-semibold'; el.textContent = `Stok kosong: tidak ada ${nama} yang bisa dikeluarkan.`; }
+        if (alokasiBelumPilihProject()) el.textContent += ' Pilih klien untuk melihat alokasinya.';
+        return;
+    }
     if (!nama || !gudangKolam.some(k => k.Nama_Item === nama)) { el.textContent = nama ? 'Belum ada stok material ini.' : ''; return; }
     const j = document.getElementById('s-jenis').value, alok = document.getElementById('s-alokasi').value, pid = document.getElementById('s-project-id').value;
     if (j === 'Masuk') el.textContent = `Stok saat ini: umum ${u}, alokasi project ${a} ${sat}`;
@@ -120,14 +145,16 @@ function perbaruiInfoStok() {
 
 function liveSearchMaterialStok() {
     let inp = document.getElementById('s-nama').value.toLowerCase(); let ul = document.getElementById('s-search-material'); ul.innerHTML = '';
-    document.getElementById('s-info-stok').textContent = '';
+    { const inf = document.getElementById('s-info-stok'); inf.textContent = ''; inf.className = 'text-xs text-gray-500 mt-1 min-h-[1rem]'; }
     if(inp.length < 1){ ul.classList.add('hidden'); return; }
     let fil = masterMaterial.filter(i => (i.Nama_Item||"").toLowerCase().includes(inp));
     if(fil.length > 0) {
         ul.classList.remove('hidden');
         fil.forEach(i => {
             let sat = (i.Satuan_Standar||"").toString().trim(); sat = sat.substring(sat.indexOf(' ')+1)||sat;
-            let li = document.createElement('li'); li.className = "p-2 border-b cursor-pointer hover:bg-indigo-50 text-sm"; li.innerText = `${i.Nama_Item} (${sat})`;
+            let li = document.createElement('li'); li.className = "p-2 border-b cursor-pointer hover:bg-indigo-50 text-sm"; li.textContent = `${i.Nama_Item} (${sat})`;
+            const tag = labelStokPilihan(i.Nama_Item, sat);   // hanya Barang Keluar: acuan stok umum / alokasi di samping nama
+            if (tag) { const sp = document.createElement('span'); sp.className = 'ml-2 text-xs font-semibold ' + (tag.kosong ? 'text-red-500' : 'text-emerald-600'); sp.textContent = tag.teks; li.appendChild(sp); }
             li.onclick = () => {
                 document.getElementById('s-nama').value = i.Nama_Item; document.getElementById('s-satuan').value = sat;
                 perbaruiInfoStok();
