@@ -130,7 +130,9 @@ async function sbDashboard() {
 
 // Pengganti GET getWorkspaceData.
 async function sbWorkspace(pId) {
-    const [tabel, gud] = await Promise.all([sbBacaBanyak(['Data_Project', 'Data_RAP_Awal', 'Data_RAP_Final']), apiGudang()]);
+    const [tabel, gud, dibeliRes] = await Promise.all([sbBacaBanyak(['Data_Project', 'Data_RAP_Awal', 'Data_RAP_Final']), apiGudang(),
+        Promise.resolve(sbKlien().from('Status_Belanja').select('*').eq('Project_ID', pId)).then(x => x, () => ({ error: true }))]);   // tabel opsional: null bila SQL-nya belum dijalankan
+    const statusDibeli = dibeliRes && !dibeliRes.error ? (dibeliRes.data || []).reduce((o, x) => { o[x.Nama_Item] = { Tanggal: x.Tanggal, Oleh: x.Oleh }; return o; }, {}) : null;
     if (!tabel.success) return tabel; if (!gud.success) return gud;
     const [semuaProject, semuaRapAwal, semuaFinal] = tabel.data, logs = gud.data.logs, kolam = gud.data.kolam || [];
     const stokUrut = logs.slice().reverse();   // lama -> baru
@@ -147,8 +149,20 @@ async function sbWorkspace(pId) {
         stokMaterialFinal: stokUrut.filter(r => r.Project_ID === pId && pemakaianProject(r)),
         belanjaMaterial: stokUrut.filter(r => r.Project_ID === pId && belanjaProject(r)).reduce((o, r) => { const n = r.Nama_Material || r.Nama_Item; o[n] = Math.round(((o[n] || 0) + (parseFloat(r.Qty_Masuk) || 0)) * 100) / 100; return o; }, {}),   // qty yang sudah dibeli (Barang Masuk 'Untuk Project') per material
         gudangStock: Object.keys(gudangMap).map(n => ({ Nama_Item: n, Total_Stok: gudangMap[n] })),
-        stokProject: stokProject, pemakaiBersama: pemakaiBersama
+        stokProject: stokProject, pemakaiBersama: pemakaiBersama, statusDibeli: statusDibeli
     } };
+}
+// Centang/lepas "Dibeli" di RAP Belanja (Purchasing). Satu baris per project + material; melepas centang = menghapus barisnya.
+async function sbCentangDibeli(pId, nama, nilai) {
+    try {
+        const id = pId + '|' + nama, el = document.getElementById('user-name');
+        const q = nilai ? sbKlien().from('Status_Belanja').upsert({ ID_Status: id, Project_ID: pId, Nama_Item: nama, Tanggal: new Date().toISOString(), Oleh: el ? el.innerText : '' }, { onConflict: 'ID_Status' }).select()
+                        : sbKlien().from('Status_Belanja').delete().eq('ID_Status', id).select();
+        const { data, error } = await q;
+        if (error) return { success: false, message: sbPesan(error) };
+        if (nilai && (!data || data.length === 0)) return { success: false, message: 'Tidak tersimpan. Anda mungkin tidak punya izin mengubah status belanja.' };
+        return { success: true, data: data && data[0] };
+    } catch (e) { return { success: false, message: sbPesan(e) }; }
 }
 
 // Pengganti POST saveTimelineBatch: ganti seluruh jadwal satu project. Baris baru ditulis dulu, baru baris lama dihapus,
