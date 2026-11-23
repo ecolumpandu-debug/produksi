@@ -9,6 +9,7 @@ const SB_TABEL = {
     Master_Material:    { pk: 'Material_ID', kolom: ['Material_ID', 'Nama_Item', 'Satuan_Standar', 'Harga_Estimasi', 'Supplier'], angka: ['Harga_Estimasi'] },
     Master_Jasa:        { pk: 'Jasa_ID', kolom: ['Jasa_ID', 'Kategori', 'Nama_Jasa', 'Satuan_Standar', 'Tarif_Tanpa_Alat', 'Tarif_Dengan_Alat'], angka: ['Tarif_Tanpa_Alat', 'Tarif_Dengan_Alat'] },
     Data_Project:       { pk: 'Project_ID', kolom: ['Project_ID', 'Brand', 'Nama_PIC_Klien', 'Kontak_Klien', 'Nama_Project', 'Alamat_Project', 'Tanggal_Mulai', 'Tanggal_Target', 'Status'] },
+    Data_RAP_Tambahan:  { pk: 'ID_Tambahan', kolom: ['ID_Tambahan', 'Project_ID', 'Nama_Item', 'Satuan', 'Harga_Satuan', 'Qty', 'Total_Harga'], angka: ['Harga_Satuan', 'Qty', 'Total_Harga'] },
     Data_RAP_Awal:      { pk: 'ID_RAP', kolom: ['ID_RAP', 'Project_ID', 'Kategori', 'Nama_Item', 'Satuan', 'Harga_Satuan', 'Qty', 'Total_Harga'], angka: ['Harga_Satuan', 'Qty', 'Total_Harga'] },
     Data_RAP_Final:     { pk: 'ID_Final', kolom: ['ID_Final', 'Project_ID', 'Kategori', 'Nama_Item', 'Satuan', 'Harga_Satuan', 'Qty', 'Total_Harga'], angka: ['Harga_Satuan', 'Qty', 'Total_Harga'] },
     Data_Timeline:      { pk: 'ID_Timeline', kolom: ['ID_Timeline', 'Project_ID', 'Kode_Tahapan', 'Tanggal_Mulai', 'Tanggal_Selesai'], angka: ['Kode_Tahapan'] },
@@ -132,6 +133,8 @@ async function sbDashboard() {
 async function sbWorkspace(pId) {
     const [tabel, gud, dibeliRes] = await Promise.all([sbBacaBanyak(['Data_Project', 'Data_RAP_Awal', 'Data_RAP_Final']), apiGudang(),
         Promise.resolve(sbKlien().from('Status_Belanja').select('*').eq('Project_ID', pId)).then(x => x, () => ({ error: true }))]);   // tabel opsional: null bila SQL-nya belum dijalankan
+    const tambRes = await sbBacaSheet('Data_RAP_Tambahan').then(x => x, () => ({ success: false }));   // tabel opsional: null bila SQL-nya belum dijalankan
+    const rapTambahan = tambRes && tambRes.success ? tambRes.data.filter(r => r.Project_ID === pId) : null;
     const statusDibeli = dibeliRes && !dibeliRes.error ? (dibeliRes.data || []).reduce((o, x) => { o[x.Nama_Item] = { Tanggal: x.Tanggal, Oleh: x.Oleh }; return o; }, {}) : null;
     if (!tabel.success) return tabel; if (!gud.success) return gud;
     const [semuaProject, semuaRapAwal, semuaFinal] = tabel.data, logs = gud.data.logs, kolam = gud.data.kolam || [];
@@ -149,7 +152,7 @@ async function sbWorkspace(pId) {
         stokMaterialFinal: stokUrut.filter(r => r.Project_ID === pId && pemakaianProject(r)),
         belanjaMaterial: stokUrut.filter(r => r.Project_ID === pId && belanjaProject(r)).reduce((o, r) => { const n = r.Nama_Material || r.Nama_Item; o[n] = Math.round(((o[n] || 0) + (parseFloat(r.Qty_Masuk) || 0)) * 100) / 100; return o; }, {}),   // qty yang sudah dibeli (Barang Masuk 'Untuk Project') per material
         gudangStock: Object.keys(gudangMap).map(n => ({ Nama_Item: n, Total_Stok: gudangMap[n] })),
-        stokProject: stokProject, pemakaiBersama: pemakaiBersama, statusDibeli: statusDibeli
+        stokProject: stokProject, pemakaiBersama: pemakaiBersama, statusDibeli: statusDibeli, rapTambahan: rapTambahan
     } };
 }
 // Centang/lepas "Dibeli" di RAP Belanja (Purchasing). Satu baris per project + material; melepas centang = menghapus barisnya.
