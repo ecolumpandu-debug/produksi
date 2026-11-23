@@ -20,7 +20,7 @@ function renderWSAwal() {
         let t = parseFloat(r.Total_Harga)||0; if(r.Kategori === 'Material') subMat+=t; else if(r.Kategori === 'Jasa') subJasa+=t; else subOps+=t;
     });
     const dsr = subMat+subJasa+subOps, prm = dsr*0.20;
-    document.getElementById('main-content').innerHTML = html + `<div class="flex justify-end"><div class="bg-gray-50 p-4 rounded border shadow-sm w-full md:w-1/2"><div class="flex justify-between text-xs mb-1"><span>Material:</span> <span>Rp ${subMat.toLocaleString('id-ID')}</span></div><div class="flex justify-between text-xs mb-1"><span>Jasa:</span> <span>Rp ${subJasa.toLocaleString('id-ID')}</span></div><div class="flex justify-between text-xs mb-1"><span>Ops:</span> <span>Rp ${subOps.toLocaleString('id-ID')}</span></div><div class="flex justify-between text-indigo-600 font-bold border-t pt-1"><span>Premi 20%:</span> <span>Rp ${prm.toLocaleString('id-ID')}</span></div><div class="flex justify-between font-bold text-lg text-indigo-900 border-t-2 pt-2"><span>TOTAL RAP:</span> <span>Rp ${(dsr+prm).toLocaleString('id-ID')}</span></div></div></div></div>`;
+    document.getElementById('main-content').innerHTML = html + `<div class="flex justify-end"><div class="bg-gray-50 p-4 rounded border shadow-sm w-full md:w-1/2"><div class="flex justify-between text-xs mb-1"><span>Material:</span> <span>Rp ${subMat.toLocaleString('id-ID')}</span></div><div class="flex justify-between text-xs mb-1"><span>Jasa:</span> <span>Rp ${subJasa.toLocaleString('id-ID')}</span></div><div class="flex justify-between text-xs mb-1"><span>Ops:</span> <span>Rp ${subOps.toLocaleString('id-ID')}</span></div><div class="flex justify-between text-indigo-600 font-bold border-t pt-1"><span>Premi 20%:</span> <span>Rp ${prm.toLocaleString('id-ID')}</span></div><div class="flex justify-between font-bold text-lg text-indigo-900 border-t-2 pt-2"><span>TOTAL RAP:</span> <span>Rp ${(dsr+prm).toLocaleString('id-ID')}</span></div></div></div>` + bagianTambahanRa() + `</div>`;
     tampilkanBarisRa();
 }
 
@@ -89,3 +89,54 @@ function editItemRa(rIdx) {
     document.getElementById('btn-simpan-ra').innerText = "Update"; document.getElementById('btn-simpan-ra').className = "w-full bg-orange-500 text-white font-bold py-2 rounded text-sm";
 }
 async function hapusItemRa(rIdx) { if(confirm("Hapus item rencana ini?")) { showLoading("Menghapus..."); const res = await apiDeleteMaster('Data_RAP_Awal', rIdx); if(res.success) bukaWorkspaceRAP('RAP_Awal', activeWorkspaceData.projectInfo.Project_ID); else { hideLoading(); alert(res.message); } } }
+
+
+// ===== MATERIAL TAMBAHAN: kebutuhan material di luar RAP Awal. Tanpa premi, tidak masuk TOTAL RAP. =====
+// Diinput di sini (bagian bawah halaman), tampil read-only di RAP Belanja. Kekurangannya dibeli lewat Barang Masuk 'Untuk Project'.
+function bagianTambahanRa() {
+    const tb = activeWorkspaceData.rapTambahan, rp = n => 'Rp ' + (n || 0).toLocaleString('id-ID');
+    let h = `<div id="ra-tambahan" class="mt-8 border-t-2 pt-4"><div class="flex flex-wrap justify-between items-center gap-2 mb-3"><h4 class="font-bold text-lg text-orange-700"><i class="fas fa-plus-circle mr-2"></i>Material Tambahan <span class="text-xs font-normal text-gray-500">(di luar RAP Awal, tanpa premi)</span></h4>`;
+    if (tb) h += `<button type="button" id="btn-tambah-mat" onclick="bukaFormTambahanRa()" class="no-print bg-orange-500 hover:bg-orange-600 text-white font-bold px-4 py-2 rounded text-sm"><i class="fas fa-plus mr-1"></i>Tambah Material</button>`;
+    h += `</div>`;
+    if (tb === null) return h + `<div id="info-sql-tambahan" class="bg-amber-50 border border-amber-300 text-amber-900 text-sm p-2 rounded no-print"><i class="fas fa-info-circle mr-1"></i>Fitur ini belum aktif. Jalankan file <b>supabase-rap-tambahan.sql</b> di Supabase SQL Editor satu kali.</div></div>`;
+    const total = tb.reduce((t, r) => t + (parseFloat(r.Total_Harga) || 0), 0);
+    h += `<table class="w-full text-sm border-collapse mb-2"><thead><tr class="bg-orange-100 text-left"><th class="p-2 border">Material</th><th class="p-2 border">Qty</th><th class="p-2 border">Harga</th><th class="p-2 border">Total</th><th class="p-2 border text-center no-print">Aksi</th></tr></thead><tbody id="ra-tamb-body">`;
+    h += tb.length ? tb.map(r => `<tr class="border-b"><td class="p-2 border">${escRap(r.Nama_Item)}</td><td class="p-2 border">${escRap(r.Qty)} ${escRap(r.Satuan)}</td><td class="p-2 border">${rp(parseFloat(r.Harga_Satuan) || 0)}</td><td class="p-2 border font-bold">${rp(parseFloat(r.Total_Harga) || 0)}</td><td class="p-2 border text-center no-print"><button type="button" class="btn-edit-tamb text-blue-600 mr-3" onclick="bukaFormTambahanRa('${r.rowIndex}')"><i class="fas fa-edit"></i></button><button type="button" class="btn-hapus-tamb text-red-600" onclick="hapusTambahanRa('${r.rowIndex}')"><i class="fas fa-trash"></i></button></td></tr>`).join('') : `<tr><td colspan="5" class="p-4 border text-center text-gray-500">Belum ada material tambahan.</td></tr>`;
+    h += `<tr class="bg-orange-50 font-bold"><td colspan="3" class="p-2 border text-right">Subtotal Material Tambahan</td><td class="p-2 border" id="ra-tamb-total">${rp(total)}</td><td class="p-2 border no-print"></td></tr></tbody></table><p class="text-xs text-gray-500">Tidak ada premi dan tidak masuk TOTAL RAP di atas. Muncul di RAP Belanja sebagai bagian terpisah.</p>`;
+    h += `<div id="modal-tambahan" class="no-print fixed inset-0 bg-black/50 items-center justify-center z-50" style="display:none"><div class="bg-white rounded-lg p-5 w-full max-w-md mx-3"><h4 class="font-bold text-orange-700 mb-3" id="tamb-judul">Tambah Material</h4><input type="hidden" id="tamb-rowIndex"><div class="relative mb-3"><label class="block text-xs font-semibold mb-1">Nama Material (pilih dari master)</label><input type="text" id="tamb-nama" onkeyup="cariMasterTambahanRa()" class="w-full border p-2 rounded text-sm" autocomplete="off"><ul id="tamb-search" class="hidden absolute z-10 bg-white border w-full max-h-40 overflow-y-auto shadow"></ul></div><div class="grid grid-cols-3 gap-3 mb-4"><div><label class="block text-xs font-semibold mb-1">Qty</label><input type="number" id="tamb-qty" min="0" step="any" class="w-full border p-2 rounded text-sm"></div><div><label class="block text-xs font-semibold mb-1">Satuan</label><input type="text" id="tamb-satuan" readonly class="w-full border p-2 rounded text-sm bg-gray-100"></div><div><label class="block text-xs font-semibold mb-1">Harga</label><input type="number" id="tamb-harga" min="0" step="any" class="w-full border p-2 rounded text-sm"></div></div><div class="flex gap-2"><button type="button" id="btn-simpan-tamb" onclick="simpanTambahanRa()" class="flex-1 bg-orange-500 text-white font-bold py-2 rounded text-sm">Simpan</button><button type="button" onclick="closeModal('modal-tambahan')" class="flex-1 bg-gray-200 font-bold py-2 rounded text-sm">Batal</button></div></div></div></div>`;
+    return h;
+}
+function bukaFormTambahanRa(rIdx) {
+    const d = rIdx ? activeWorkspaceData.rapTambahan.find(r => r.rowIndex == rIdx) : null;
+    document.getElementById('tamb-rowIndex').value = d ? d.rowIndex : '';
+    document.getElementById('tamb-nama').value = d ? d.Nama_Item : ''; document.getElementById('tamb-qty').value = d ? d.Qty : '';
+    document.getElementById('tamb-satuan').value = d ? d.Satuan : ''; document.getElementById('tamb-harga').value = d ? (parseFloat(d.Harga_Satuan) || 0) : '';
+    document.getElementById('tamb-judul').innerText = d ? 'Edit Material Tambahan' : 'Tambah Material'; document.getElementById('tamb-search').classList.add('hidden');
+    document.getElementById('modal-tambahan').style.display = 'flex';
+}
+function cariMasterTambahanRa() {
+    const inp = document.getElementById('tamb-nama').value.toLowerCase(), ul = document.getElementById('tamb-search'); ul.innerHTML = '';
+    if (!inp) { ul.classList.add('hidden'); return; }
+    const fil = masterMaterial.filter(i => String(i.Nama_Item || '').toLowerCase().includes(inp));
+    if (!fil.length) { ul.classList.add('hidden'); return; }
+    ul.classList.remove('hidden');
+    fil.forEach(i => {
+        let s = (i.Satuan_Standar || i.Satuan || '').toString().trim(); s = s.substring(s.indexOf(' ') + 1) || s;
+        const h = parseInt((i.Harga_Estimasi || 0).toString().replace(/[^0-9-]/g, '')) || 0;
+        const li = document.createElement('li'); li.className = 'p-2 border-b cursor-pointer hover:bg-orange-100 text-sm'; li.innerHTML = `<strong>${escRap(i.Nama_Item)}</strong> <span class="text-xs">(Rp ${h.toLocaleString('id-ID')} / ${escRap(s)})</span>`;
+        li.onclick = () => { document.getElementById('tamb-nama').value = i.Nama_Item; document.getElementById('tamb-harga').value = h; document.getElementById('tamb-satuan').value = s; ul.classList.add('hidden'); document.getElementById('tamb-qty').focus(); };
+        ul.appendChild(li);
+    });
+}
+async function simpanTambahanRa() {
+    const rIdx = document.getElementById('tamb-rowIndex').value, pId = activeWorkspaceData.projectInfo.Project_ID, nm = document.getElementById('tamb-nama').value.trim();
+    const qty = parseFloat(document.getElementById('tamb-qty').value) || 0, hrg = parseFloat(document.getElementById('tamb-harga').value) || 0, sat = document.getElementById('tamb-satuan').value;
+    if (!nm || qty <= 0) return alert('Nama dan Qty wajib diisi!');
+    if (!masterMaterial.some(i => i.Nama_Item === nm)) return alert('Pilih nama material dari daftar master supaya cocok dengan data stok.');
+    if (activeWorkspaceData.rapTambahan.some(r => r.Nama_Item === nm && String(r.rowIndex) !== String(rIdx))) return alert('Material ini sudah ada di Material Tambahan. Edit baris yang ada.');
+    showLoading('Menyimpan Material Tambahan...');
+    const row = [rIdx ? activeWorkspaceData.rapTambahan.find(r => r.rowIndex == rIdx).ID_Tambahan : 'RT-' + new Date().getTime(), pId, nm, sat, hrg, qty, qty * hrg];
+    const res = rIdx ? await apiUpdateMaster('Data_RAP_Tambahan', rIdx, row) : await apiSaveMaster('Data_RAP_Tambahan', row);
+    if (res.success) bukaWorkspaceRAP('RAP_Awal', pId); else { hideLoading(); alert(res.message); }
+}
+async function hapusTambahanRa(rIdx) { if (confirm('Hapus material tambahan ini?')) { showLoading('Menghapus...'); const res = await apiDeleteMaster('Data_RAP_Tambahan', rIdx); if (res.success) bukaWorkspaceRAP('RAP_Awal', activeWorkspaceData.projectInfo.Project_ID); else { hideLoading(); alert(res.message); } } }
