@@ -54,9 +54,8 @@ function ubahCariBelanja() {
 }
 function ubahFilterBelanja() { rbFilter = document.getElementById('rb-filter').value; renderWSBelanja(); }
 
-function renderWSBelanja() {
-    if (rbProyek !== activeWorkspaceData.projectInfo.Project_ID) { rbProyek = activeWorkspaceData.projectInfo.Project_ID; rbFilter = 'semua'; rbCari = ''; }
-    const rp = n => 'Rp ' + (n || 0).toLocaleString('id-ID');
+// Menghitung baris RAP Belanja (utama + Material Tambahan) dari activeWorkspaceData. Dipakai layar ini dan menu Backup Data.
+function hitungBelanjaRap() {
     const bulat = n => Math.round(n * 100) / 100;
     const peta = petaSupplierRap();
     const semua = [];
@@ -98,6 +97,13 @@ function renderWSBelanja() {
         tamb.push({ sup: supplierItemRap(peta, r.Nama_Item), status: beli <= 0 ? 'cukup' : (stok <= 0 ? 'kosong' : 'kurang'), sb, manual, otomatis, dibeli: manual || sb.kode === 'sudah', infoDibeli: manual ? ada[kunci] : null, kunci, nama: r.Nama_Item, sat: r.Satuan, stok, umum: bulat(Math.max(0, sp.Umum)), alok: bulat(Math.max(0, sp.Alokasi)), bersama: [], butuh, beli, harga, total: bulat(beli * harga) });
     });
     const gabung = semua.concat(tamb);
+    return { semua, tamb, gabung };
+}
+
+function renderWSBelanja() {
+    if (rbProyek !== activeWorkspaceData.projectInfo.Project_ID) { rbProyek = activeWorkspaceData.projectInfo.Project_ID; rbFilter = 'semua'; rbCari = ''; }
+    const rp = n => 'Rp ' + (n || 0).toLocaleString('id-ID');
+    const { semua, tamb, gabung } = hitungBelanjaRap();
 
     const jumlah = { semua: gabung.length, beli: gabung.filter(b => b.status !== 'cukup').length, kosong: gabung.filter(b => b.status === 'kosong').length, cukup: gabung.filter(b => b.status === 'cukup').length, blmbeli: gabung.filter(b => b.sb.kode !== 'tidak' && !b.dibeli).length, tunggu: gabung.filter(b => b.dibeli && (b.sb.kode === 'belum' || b.sb.kode === 'sebagian')).length, belum: gabung.filter(b => b.sb.kode === 'belum').length, sebagian: gabung.filter(b => b.sb.kode === 'sebagian').length, sudah: gabung.filter(b => b.sb.kode === 'sudah').length };
     const cocok = { semua: () => true, beli: b => b.status !== 'cukup', kosong: b => b.status === 'kosong', cukup: b => b.status === 'cukup', blmbeli: b => b.sb.kode !== 'tidak' && !b.dibeli, tunggu: b => b.dibeli && (b.sb.kode === 'belum' || b.sb.kode === 'sebagian'), belum: b => b.sb.kode === 'belum', sebagian: b => b.sb.kode === 'sebagian', sudah: b => b.sb.kode === 'sudah' }[rbFilter];
@@ -142,7 +148,7 @@ function renderWSBelanja() {
         bodyT += `<tr class="bg-orange-50"><td colspan="11" class="p-2 border font-bold text-orange-900"><i class="fas fa-store mr-2 text-orange-400"></i>${escRap(sup)} <span class="font-normal text-xs text-gray-500">(${baris.length} material)</span></td></tr>` + baris.map(b => barisBelanjaRap(b, sup, rp)).join('') + `<tr class="bg-gray-100 font-semibold"><td colspan="7" class="p-2 border text-right">Subtotal ${escRap(sup)}</td><td class="p-2 border text-right">${rp(sub)}</td><td class="p-2 border" colspan="3"></td></tr>`;
     });
     if (tamb.length) {
-        html += `<div id="belanja-tambahan" class="mt-6"><h4 class="font-bold text-orange-700 mb-2"><i class="fas fa-plus-circle mr-2"></i>Material Tambahan <span class="text-xs font-normal text-gray-500">Kekurangan Material</span></h4><table class="w-full text-sm border-collapse mb-2"><thead><tr class="bg-orange-100 text-left"><th class="p-2 border">Material</th><th class="p-2 border">Supplier</th><th class="p-2 border text-center">Stok</th><th class="p-2 border text-center">Kebutuhan</th><th class="p-2 border text-center bg-red-600 text-white font-bold">QTY</th><th class="p-2 border text-center">Satuan</th><th class="p-2 border text-right">Harga</th><th class="p-2 border text-right">Total</th><th class="p-2 border text-center">Dibeli?</th><th class="p-2 border text-center">Status Barang</th><th class="p-2 border">Keterangan</th></tr></thead><tbody>${bodyT || '<tr><td colspan="11" class="p-4 border text-center text-gray-500">Tidak ada material tambahan pada filter ini.</td></tr>'}<tr class="bg-orange-50 font-bold"><td colspan="7" class="p-2 border text-right">Subtotal Material Tambahan</td><td class="p-2 border text-right" id="sub-tambahan">${rp(growTamb)}</td><td class="p-2 border" colspan="3"></td></tr></tbody></table><p class="text-xs text-gray-500 mb-4">Stok tambahan = stok dikurangi kebutuhan RAP Awal material yang sama. Kekurangan dibeli lewat Barang Masuk "Untuk Project".</p></div>`;
+        html += `<div id="belanja-tambahan" class="mt-6"><h4 class="font-bold text-orange-700 mb-2"><i class="fas fa-plus-circle mr-2"></i>Material Tambahan <span class="text-xs font-normal text-gray-500">(diinput di RAP Awal, tanpa premi)</span></h4><table class="w-full text-sm border-collapse mb-2"><thead><tr class="bg-orange-100 text-left"><th class="p-2 border">Material</th><th class="p-2 border">Supplier</th><th class="p-2 border text-center">Stok</th><th class="p-2 border text-center">Kebutuhan</th><th class="p-2 border text-center bg-red-600 text-white font-bold">QTY</th><th class="p-2 border text-center">Satuan</th><th class="p-2 border text-right">Harga</th><th class="p-2 border text-right">Total</th><th class="p-2 border text-center">Dibeli?</th><th class="p-2 border text-center">Status Barang</th><th class="p-2 border">Keterangan</th></tr></thead><tbody>${bodyT || '<tr><td colspan="11" class="p-4 border text-center text-gray-500">Tidak ada material tambahan pada filter ini.</td></tr>'}<tr class="bg-orange-50 font-bold"><td colspan="7" class="p-2 border text-right">Subtotal Material Tambahan</td><td class="p-2 border text-right" id="sub-tambahan">${rp(growTamb)}</td><td class="p-2 border" colspan="3"></td></tr></tbody></table><p class="text-xs text-gray-500 mb-4">Stok tambahan = stok dikurangi kebutuhan RAP Awal material yang sama. Kekurangan dibeli lewat Barang Masuk "Untuk Project".</p></div>`;
     }
     html += `<div class="flex justify-end" style="break-inside:avoid"><div class="bg-gray-50 p-4 rounded border shadow-sm w-full md:w-1/2">${tamb.length ? `<div class="flex justify-between text-xs mb-1"><span>Belanja RAP Awal:</span> <span>${rp(grand)}</span></div><div class="flex justify-between text-xs mb-1"><span>Belanja Material Tambahan:</span> <span>${rp(growTamb)}</span></div>` : ''}<div class="flex justify-between font-bold text-lg text-indigo-900"><span>TOTAL BELANJA${rbFilter === 'semua' && !kw ? '' : ' (sesuai filter)'}:</span> <span id="total-belanja">${rp(grand + growTamb)}</span></div></div></div>`;
     html += renderApprovalRap(['Kepala Produksi', 'Purchasing']);
