@@ -24,6 +24,7 @@ const tglJamBackup = d => { const p = n => String(n).padStart(2, '0'); return `$
 const tglFileBackup = d => { const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
 
 function renderBackup() {
+    hideLoading();   // router menampilkan "Memuat modul menu..."; menu ini tidak memuat data sehingga harus menutupnya sendiri
     const t = backupTerakhir();
     document.getElementById('header-title').innerText = 'Backup Data';
     document.getElementById('main-content').innerHTML = `<div class="bg-white rounded-lg shadow">
