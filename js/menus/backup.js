@@ -4,6 +4,7 @@
 //   Info | Stok Tersedia (Umum + alokasi per project) | Aset | Daftar Project | satu tab per project
 //   (RAP Awal + RAP Belanja + RAP Final) | Master Material / Jasa / Operasional / Supplier.
 // Opsional: data mentah (Kartu Stok, Timeline, Surat Jalan, Status Belanja) untuk arsip lengkap.
+// Bagian bawah halaman: Reset Project (backup dulu, sisa alokasi dipindah ke Stok Umum, lalu data project dihapus untuk menghemat ruang).
 // Library SheetJS dimuat hanya saat menu ini dipakai. Isi file adalah salinan data, bukan alat pemulihan otomatis.
 // =========================================================================
 const BACKUP_XLSX_URL = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
@@ -41,8 +42,28 @@ function renderBackup() {
             <table class="w-full text-sm border-collapse"><thead><tr class="bg-gray-100 text-left"><th class="p-2 border">Tab di Excel</th><th class="p-2 border">Isi</th><th class="p-2 border text-right">Jumlah</th></tr></thead>
             <tbody id="tabel-backup">${BACKUP_DAFTAR.map((b, i) => `<tr data-baris="${i}"><td class="p-2 border">${escBackup(b[0])}</td><td class="p-2 border text-gray-600">${escBackup(b[1])}</td><td class="p-2 border text-right jml-baris text-gray-400">-</td></tr>`).join('')}</tbody></table>
             <p class="text-xs text-gray-500 mt-3">Data login pengguna tidak ikut. Tanpa data mentah, riwayat transaksi stok satu per satu tidak tersimpan di file ini.</p>
+        </div></div>
+    <div class="bg-white rounded-lg shadow mt-6">
+        <div class="p-4 border-b"><h2 class="text-xl font-bold text-red-700"><i class="fas fa-eraser mr-2"></i>Reset Project</h2></div>
+        <div class="p-4">
+            <p class="text-sm text-gray-600 mb-2">Untuk menghemat ruang database. Urutannya otomatis: <b>(1)</b> backup Excel lengkap (termasuk data mentah) diunduh, <b>(2)</b> sisa stok alokasi project dipindah ke <b>Stok Umum</b>, <b>(3)</b> project dihapus beserta RAP Awal, Material Tambahan, RAP Final (jasa/operasional), Timeline, Surat Jalan dan centang Dibeli.</p>
+            <p class="text-xs text-gray-500 mb-3">Riwayat Kartu Stok tetap tersimpan, jadi stok dan nilai barang tidak berubah. Transaksi lama project akan tampil dengan kode project (nama klien sudah tidak ada). Tidak bisa dibatalkan, data hanya tersisa di file Excel.</p>
+            <div id="daftar-reset" class="text-sm text-gray-500">Memuat daftar project...</div>
+            <div class="mt-3 flex flex-wrap items-center gap-3"><button type="button" id="btn-reset" onclick="jalankanResetProject()" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-5 rounded shadow"><i class="fas fa-eraser mr-2"></i>Backup lalu Reset Project Terpilih</button><span id="status-reset" class="text-sm"></span></div>
         </div></div>`;
+    muatDaftarReset();
 }
+
+// Daftar project untuk dipilih (centang). Project yang sudah Selesai/Batal bisa dipilih sekaligus lewat tombol pintas.
+async function muatDaftarReset() {
+    const el = document.getElementById('daftar-reset'); if (!el) return;
+    const res = await sbBacaSheet('Data_Project');
+    if (!res.success) { el.innerHTML = `<span class="text-red-600">Gagal memuat project: ${escBackup(res.message)}</span>`; return; }
+    if (!res.data.length) { el.textContent = 'Belum ada project.'; return; }
+    el.innerHTML = `<div class="mb-2"><button type="button" onclick="pilihResetSelesai()" class="text-xs border px-2 py-1 rounded bg-gray-50 hover:bg-gray-100">Centang semua yang Selesai / Batal</button> <button type="button" onclick="document.querySelectorAll('.cek-reset').forEach(c => c.checked = false)" class="text-xs border px-2 py-1 rounded bg-gray-50 hover:bg-gray-100">Kosongkan</button></div>`
+        + res.data.map(p => `<label class="flex items-center gap-2 py-1 border-b"><input type="checkbox" class="cek-reset w-4 h-4" value="${escBackup(p.Project_ID)}" data-status="${escBackup(p.Status)}"><span class="font-semibold text-gray-800">${escBackup(p.Nama_PIC_Klien)}</span><span class="text-gray-500">${escBackup(p.Nama_Project)}</span><span class="text-xs text-gray-400">${escBackup(p.Project_ID)}</span><span class="ml-auto text-xs px-2 py-0.5 rounded bg-gray-100">${escBackup(p.Status)}</span></label>`).join('');
+}
+function pilihResetSelesai() { document.querySelectorAll('.cek-reset').forEach(c => { c.checked = c.dataset.status === 'Selesai' || c.dataset.status === 'Batal'; }); }
 
 // Baca satu tabel utuh (per 1000 baris), semua kolom. null = tabel tidak ada / tidak bisa dibaca.
 async function bacaTabelBackup(tabel) {
@@ -115,8 +136,10 @@ function tabProjectBackup(ws) {
     return sheetBackup(aoa, [30, 34, 12, 12, 14, 14, 14, 16, 10, 24]);
 }
 
-async function jalankanBackup() {
-    const btn = document.getElementById('btn-backup'), st = document.getElementById('status-backup'), mentah = !!(document.getElementById('backup-mentah') || {}).checked;
+async function jalankanBackup(opsi) {   // opsi: { mentah, akhiran }; mengembalikan nama file bila berhasil, false bila gagal
+    opsi = opsi || {};
+    const btn = document.getElementById('btn-backup'), st = document.getElementById('status-backup'), mentah = opsi.mentah !== undefined ? opsi.mentah : !!(document.getElementById('backup-mentah') || {}).checked;
+    let hasil = false;
     btn.disabled = true; btn.classList.add('opacity-60');
     const info = (h, warna) => { st.innerHTML = `<span class="${warna || 'text-indigo-700'}">${h}</span>`; };
     const putar = t => info(`<i class="fas fa-spinner fa-spin mr-1"></i>${t}`);
@@ -156,12 +179,58 @@ async function jalankanBackup() {
         ringkas.unshift({ Tab: 'BACKUP ECOLUM', Isi: 'Dibuat ' + tglJamBackup(sekarang) + ' oleh ' + oleh });
         tambah(sheetBackup([['Tab', 'Isi']].concat(ringkas.map(r => [r.Tab, r.Isi])), [34, 60]), 'Info');
         wb.SheetNames.unshift(wb.SheetNames.pop());   // tab Info paling depan
-        const nama = `Backup-Ecolum-${tglFileBackup(sekarang)}.xlsx`;
+        const nama = `Backup-Ecolum-${tglFileBackup(sekarang)}${opsi.akhiran || ''}.xlsx`;
         XLSX.writeFile(wb, nama);
         const rec = { waktu: tglJamBackup(sekarang), oleh }; simpanBackupTerakhir(rec);
         document.getElementById('info-backup-terakhir').innerHTML = `Backup terakhir dari browser ini: <b>${escBackup(rec.waktu)}</b> oleh ${escBackup(oleh || '-')}`;
+        hasil = nama;
         info(`<i class="fas fa-check-circle mr-1"></i>Selesai. File <b>${escBackup(nama)}</b> terunduh (cek folder Download).`, 'text-green-700');
     } catch (e) { info('<i class="fas fa-exclamation-triangle mr-1"></i>Gagal: ' + escBackup(e.message || e), 'text-red-700'); }
     try { activeWorkspaceData = awalAktif; } catch (e) {}   // kembalikan seperti semula
+    btn.disabled = false; btn.classList.remove('opacity-60');
+    return hasil;
+}
+
+// ---------- Reset Project ----------
+let _urutPindahBackup = 0;
+async function jalankanResetProject() {
+    const pids = [...document.querySelectorAll('.cek-reset:checked')].map(c => c.value), st = document.getElementById('status-reset'), btn = document.getElementById('btn-reset');
+    const info = (h, warna) => { st.innerHTML = `<span class="${warna || 'text-gray-700'}">${h}</span>`; };
+    if (!pids.length) return alert('Centang minimal satu project yang akan direset.');
+    const proj = await sbBacaSheet('Data_Project'); if (!proj.success) return alert(proj.message);
+    const terpilih = proj.data.filter(p => pids.indexOf(p.Project_ID) !== -1);
+    const gud0 = await apiGudang(); if (!gud0.success) return alert('Gagal membaca stok: ' + gud0.message);
+    const alokasiDari = pid => (gud0.data.kolam || []).filter(k => k.Kolam === 'Project' && k.Project_ID === pid);
+    const minus = terpilih.map(p => alokasiDari(p.Project_ID).filter(k => k.Stok < 0).length).reduce((a, b) => a + b, 0);
+    const daftar = terpilih.map(p => `- ${p.Nama_PIC_Klien} (${p.Project_ID}, ${p.Status}), ${alokasiDari(p.Project_ID).filter(k => k.Stok > 0).length} material beralokasi`).join('\n');
+    if (!confirm(`Reset ${terpilih.length} project:\n${daftar}\n\nBackup Excel lengkap diunduh dulu, sisa alokasi dipindah ke Stok Umum, lalu project dihapus PERMANEN.${minus ? `\n\nPERHATIAN: ${minus} alokasi bernilai minus tidak bisa dipindah dan akan tertinggal.` : ''}\n\nLanjutkan?`)) return;
+    if (String(prompt('Ketik RESET (huruf besar) untuk memastikan:') || '').trim() !== 'RESET') return alert('Dibatalkan: kata konfirmasi tidak sesuai.');
+    btn.disabled = true; btn.classList.add('opacity-60');
+    try {
+        info('<i class="fas fa-spinner fa-spin mr-1"></i>Membuat backup...');
+        const nama = await jalankanBackup({ mentah: true, akhiran: '-sebelum-reset' });
+        if (!nama) throw new Error('Backup gagal, reset dibatalkan. Tidak ada data yang dihapus.');
+        if (!confirm(`Backup ${nama} sudah terunduh (cek folder Download).\n\nLanjut menghapus ${terpilih.length} project dari database?`)) { info('Dibatalkan setelah backup. Tidak ada data yang dihapus.', 'text-amber-700'); btn.disabled = false; btn.classList.remove('opacity-60'); return; }
+        const sj = await sbBacaSheet('Data_Surat_Jalan'), laporan = [];
+        const tgl = tglFileBackup(new Date());
+        for (const p of terpilih) {
+            info(`<i class="fas fa-spinner fa-spin mr-1"></i>Mereset ${escBackup(p.Nama_PIC_Klien || p.Project_ID)}...`);
+            // 1) alokasi project -> Stok Umum (pasangan Keluar + Masuk, sama seperti Pindah Alokasi di Data Stok)
+            let nPindah = 0;
+            for (const k of alokasiDari(p.Project_ID).filter(x => x.Stok > 0)) {
+                const ket = `Dipindah dari Alokasi ${p.Nama_PIC_Klien || p.Project_ID} ke Stok Umum (reset project)`, h = angkaBackup(k.Harga), q = Math.round(k.Stok * 100) / 100;
+                const baris = (jenis, kat, proj) => ['STK-' + (Date.now() + (_urutPindahBackup++)), tgl, k.Nama_Item, jenis, kat, proj, jenis === 'Masuk' ? q : 0, jenis === 'Keluar' ? q : 0, k.Satuan || '', h, q * h, ket];
+                for (const r of [baris('Keluar', 'Pindah Alokasi (Keluar)', p.Project_ID), baris('Masuk', 'Pindah Alokasi (Masuk)', '')]) { const res = await apiSaveMaster('Data_Kartu_Stok', r); if (!res.success) throw new Error(`Gagal memindah stok ${k.Nama_Item}: ${res.message}. Project ${p.Nama_PIC_Klien} belum dihapus.`); }
+                nPindah++;
+            }
+            // 2) surat jalan + centang Dibeli milik project
+            if (sj.success) for (const r of sj.data.filter(x => x.Project_ID === p.Project_ID).sort((a, b) => b.rowIndex - a.rowIndex)) { const res = await apiDeleteMaster('Data_Surat_Jalan', r.rowIndex); if (!res.success) throw new Error('Gagal menghapus surat jalan: ' + res.message); }
+            try { await sbKlien().from('Status_Belanja').delete().eq('Project_ID', p.Project_ID); } catch (e) {}   // tabel opsional
+            // 3) project (RAP Awal, RAP Tambahan, RAP Final, Timeline ikut terhapus otomatis oleh database)
+            const res = await apiDeleteMaster('Data_Project', p.rowIndex); if (!res.success) throw new Error(`Gagal menghapus project ${p.Nama_PIC_Klien}: ${res.message}`);
+            laporan.push(`${escBackup(p.Nama_PIC_Klien || p.Project_ID)}: ${nPindah} material dipindah ke Stok Umum`);
+        }
+        info(`<i class="fas fa-check-circle mr-1"></i>Selesai. ${laporan.join('; ')}.`, 'text-green-700'); muatDaftarReset();
+    } catch (e) { info('<i class="fas fa-exclamation-triangle mr-1"></i>' + escBackup(e.message || e), 'text-red-700'); }
     btn.disabled = false; btn.classList.remove('opacity-60');
 }
