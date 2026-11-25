@@ -21,7 +21,8 @@ const MENUS = {
     Master_Material:    { files: ['master'], open: () => renderMenuMaster('Master_Material') },
     Master_Jasa:        { files: ['master'], open: () => renderMenuMaster('Master_Jasa') },
     Master_Operasional: { files: ['master'], open: () => renderMenuMaster('Master_Operasional') },
-    Master_Supplier:    { files: ['master'], open: () => renderMenuMaster('Master_Supplier') }
+    Master_Supplier:    { files: ['master'], open: () => renderMenuMaster('Master_Supplier') },
+    Backup_Data:        { files: ['backup'], open: () => renderBackup() }
 };
 
 // =========================================================================
