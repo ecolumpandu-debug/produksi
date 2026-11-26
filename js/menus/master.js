@@ -92,6 +92,7 @@ function openModalMaster(isEdit, rowIndex = null) {
 // (Kartu Stok, RAP Awal, Material Tambahan, RAP Final, centang Dibeli). Baris master dicari lewat kodenya (Material_ID dst).
 // Tabel opsional (belum dibuat di Supabase) dilewati. Bila ada yang gagal di tengah jalan, yang sudah diganti dikembalikan.
 // =========================================================================
+const TABEL_KUNCI_BELANJA = [['Status_Belanja', 'ID_Status'], ['Prioritas_Belanja', 'ID_Prioritas']];
 const _CEK_NAMA = n => String(n == null ? '' : n).trim().toLowerCase();
 function _saring(q, saring) { Object.keys(saring || {}).forEach(k => { q = q.eq(k, saring[k]); }); return q; }
 
@@ -103,9 +104,9 @@ async function hitungPemakaianNama(db, cfg, lama) {
         if (error) { if (opsional) continue; throw new Error(`Gagal membaca ${tabel}: ${error.message}`); }
         if (data.length) rincian.push({ tabel, jumlah: data.length });
     }
-    if (cfg.statusBelanja) {
-        const { data, error } = await db.from('Status_Belanja').select('ID_Status').in('Nama_Item', [lama, '[Tambahan] ' + lama]);
-        if (!error && data.length) rincian.push({ tabel: 'Status_Belanja', jumlah: data.length });
+    if (cfg.statusBelanja) for (const [tabel, pk] of TABEL_KUNCI_BELANJA) {   // centang Dibeli + Status Belanja (Urgent): kunci berisi nama material
+        const { data, error } = await db.from(tabel).select(pk).in('Nama_Item', [lama, '[Tambahan] ' + lama]);
+        if (!error && data.length) rincian.push({ tabel, jumlah: data.length });
     }
     return { total: rincian.reduce((t, r) => t + r.jumlah, 0), rincian };
 }
@@ -119,13 +120,13 @@ async function gantiNamaDiRujukan(db, cfg, lama, baru) {
             if (error) { if (opsional) continue; throw new Error(`Gagal memperbarui ${tabel}: ${error.message}`); }
             if (dari === lama) selesai.push([tabel, kolom, saring]);
         }
-        if (cfg.statusBelanja) {
-            const { data, error } = await db.from('Status_Belanja').select('ID_Status,Project_ID,Nama_Item').in('Nama_Item', [dari, '[Tambahan] ' + dari]);
-            if (error) return;   // tabel opsional
+        if (cfg.statusBelanja) for (const [tabel, pk] of TABEL_KUNCI_BELANJA) {
+            const { data, error } = await db.from(tabel).select(pk + ',Project_ID,Nama_Item').in('Nama_Item', [dari, '[Tambahan] ' + dari]);
+            if (error) continue;   // tabel opsional
             for (const r of data) {
                 const nama = r.Nama_Item === dari ? ke : '[Tambahan] ' + ke;
-                const { error: e2 } = await db.from('Status_Belanja').update({ Nama_Item: nama, ID_Status: r.Project_ID + '|' + nama }).eq('ID_Status', r.ID_Status);
-                if (e2) throw new Error('Gagal memperbarui Status_Belanja: ' + e2.message);
+                const { error: e2 } = await db.from(tabel).update({ Nama_Item: nama, [pk]: r.Project_ID + '|' + nama }).eq(pk, r[pk]);
+                if (e2) throw new Error(`Gagal memperbarui ${tabel}: ${e2.message}`);
             }
         }
     };

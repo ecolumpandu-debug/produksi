@@ -9,13 +9,13 @@
 // =========================================================================
 const BACKUP_XLSX_URL = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
 const BACKUP_KUNCI = 'ecolum_backup_terakhir';
-const BACKUP_PK = { Status_Belanja: 'ID_Status' };   // tabel di luar SB_TABEL
+const BACKUP_PK = { Status_Belanja: 'ID_Status', Prioritas_Belanja: 'ID_Prioritas' };   // tabel di luar SB_TABEL
 const BACKUP_DAFTAR = [   // [tab, isi]
     ['Stok Tersedia', 'Stok per material: Stok Umum dan alokasi tiap project'], ['Aset', 'Data Aset'], ['Daftar Project', 'Semua project'],
     ['Satu tab per project', 'RAP Awal + Material Tambahan + RAP Belanja + RAP Final'],
     ['Master Material', 'Data Master Material'], ['Master Jasa', 'Data Master Jasa'], ['Master Operasional', 'Data Master Operasional'], ['Master Supplier', 'Data Master Supplier']
 ];
-const BACKUP_MENTAH = [['Data_Kartu_Stok', 'Kartu Stok'], ['Data_Timeline', 'Timeline'], ['Data_Surat_Jalan', 'Surat Jalan'], ['Status_Belanja', 'Status Belanja']];
+const BACKUP_MENTAH = [['Data_Kartu_Stok', 'Kartu Stok'], ['Data_Timeline', 'Timeline'], ['Data_Surat_Jalan', 'Surat Jalan'], ['Status_Belanja', 'Status Belanja'], ['Prioritas_Belanja', 'Prioritas Belanja']];
 
 const escBackup = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 function backupTerakhir() { try { return JSON.parse(localStorage.getItem(BACKUP_KUNCI) || 'null'); } catch (e) { return null; } }
@@ -117,8 +117,8 @@ function tabProjectBackup(ws) {
     kosong();
 
     // --- RAP BELANJA ---
-    const { semua, tamb } = hitungBelanjaRap(), kepala = ['Material', 'Supplier', 'Stok', 'Kebutuhan', 'QTY Beli', 'Satuan', 'Harga', 'Total', 'Dibeli?', 'Status Barang'];
-    const barisB = b => [b.nama, b.sup === SUPPLIER_KOSONG_RAP ? '-' : b.sup, b.stok, b.butuh, b.beli, b.sat, b.harga, b.total, b.sb.kode === 'tidak' ? '-' : (b.dibeli ? 'Ya' : 'Belum'), statusBarangBackup(b)];
+    const { semua, tamb } = hitungBelanjaRap(), kepala = ['Material', 'Supplier', 'Stok', 'Kebutuhan', 'QTY Beli', 'Satuan', 'Harga', 'Total', 'Status Belanja', 'Dibeli?', 'Status Barang'];
+    const barisB = b => [b.nama, b.sup === SUPPLIER_KOSONG_RAP ? '-' : b.sup, b.stok, b.butuh, b.beli, b.sat, b.harga, b.total, b.sb.kode === 'tidak' ? '-' : (b.urgent ? 'Urgent' : 'Normal'), b.sb.kode === 'tidak' ? '-' : (b.dibeli ? 'Ya' : 'Belum'), statusBarangBackup(b)];
     const urut = (a, b) => bandingSupplierRap(a.sup, b.sup) || String(a.nama).localeCompare(String(b.nama), 'id');
     tebal('RAP BELANJA'); aoa.push(kepala);
     const totB = semua.reduce((t, b) => t + b.total, 0), totT = tamb.reduce((t, b) => t + b.total, 0);
@@ -133,7 +133,7 @@ function tabProjectBackup(ws) {
     tebal('2. Jasa & Operasional aktual'); aoa.push(['Kategori', 'Nama Item', 'Qty', 'Satuan', 'Harga Satuan', 'Total']);
     let sj = 0; ws.rapFinalManual.forEach(m => { const t = angkaBackup(m.Total_Harga); sj += t; aoa.push([m.Kategori, m.Nama_Item, angkaBackup(m.Qty), m.Satuan, angkaBackup(m.Harga_Satuan), t]); });
     aoa.push(['', 'Subtotal Jasa/Operasional', '', '', '', sj]); aoa.push(['', 'Premi 20%', '', '', '', (sm + sj) * PREMI]); aoa.push(['', 'TOTAL RAP FINAL', '', '', '', (sm + sj) * (1 + PREMI)]);
-    return sheetBackup(aoa, [30, 34, 12, 12, 14, 14, 14, 16, 10, 24]);
+    return sheetBackup(aoa, [30, 34, 12, 12, 14, 14, 14, 16, 14, 10, 24]);
 }
 
 async function jalankanBackup(opsi) {   // opsi: { mentah, akhiran }; mengembalikan nama file bila berhasil, false bila gagal
