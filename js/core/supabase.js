@@ -135,6 +135,8 @@ async function sbWorkspace(pId) {
         Promise.resolve(sbKlien().from('Status_Belanja').select('*').eq('Project_ID', pId)).then(x => x, () => ({ error: true }))]);   // tabel opsional: null bila SQL-nya belum dijalankan
     const tambRes = await sbBacaSheet('Data_RAP_Tambahan').then(x => x, () => ({ success: false }));   // tabel opsional: null bila SQL-nya belum dijalankan
     const rapTambahan = tambRes && tambRes.success ? tambRes.data.filter(r => r.Project_ID === pId) : null;
+    const priRes = await Promise.resolve(sbKlien().from('Prioritas_Belanja').select('*').eq('Project_ID', pId)).then(x => x, () => ({ error: true }));   // tabel opsional: null bila SQL-nya belum dijalankan
+    const prioritas = priRes && !priRes.error ? (priRes.data || []).reduce((o, x) => { o[x.Nama_Item] = { Tanggal: x.Tanggal, Oleh: x.Oleh }; return o; }, {}) : null;
     const statusDibeli = dibeliRes && !dibeliRes.error ? (dibeliRes.data || []).reduce((o, x) => { o[x.Nama_Item] = { Tanggal: x.Tanggal, Oleh: x.Oleh }; return o; }, {}) : null;
     if (!tabel.success) return tabel; if (!gud.success) return gud;
     const [semuaProject, semuaRapAwal, semuaFinal] = tabel.data, logs = gud.data.logs, kolam = gud.data.kolam || [];
@@ -152,7 +154,7 @@ async function sbWorkspace(pId) {
         stokMaterialFinal: stokUrut.filter(r => r.Project_ID === pId && pemakaianProject(r)),
         belanjaMaterial: stokUrut.filter(r => r.Project_ID === pId && belanjaProject(r)).reduce((o, r) => { const n = r.Nama_Material || r.Nama_Item; o[n] = Math.round(((o[n] || 0) + (parseFloat(r.Qty_Masuk) || 0)) * 100) / 100; return o; }, {}),   // qty yang sudah dibeli (Barang Masuk 'Untuk Project') per material
         gudangStock: Object.keys(gudangMap).map(n => ({ Nama_Item: n, Total_Stok: gudangMap[n] })),
-        stokProject: stokProject, pemakaiBersama: pemakaiBersama, statusDibeli: statusDibeli, rapTambahan: rapTambahan
+        stokProject: stokProject, pemakaiBersama: pemakaiBersama, statusDibeli: statusDibeli, rapTambahan: rapTambahan, prioritas: prioritas
     } };
 }
 // Centang/lepas "Dibeli" di RAP Belanja (Purchasing). Satu baris per project + material; melepas centang = menghapus barisnya.
@@ -164,6 +166,20 @@ async function sbCentangDibeli(pId, nama, nilai) {
         const { data, error } = await q;
         if (error) return { success: false, message: sbPesan(error) };
         if (nilai && (!data || data.length === 0)) return { success: false, message: 'Tidak tersimpan. Anda mungkin tidak punya izin mengubah status belanja.' };
+        return { success: true, data: data && data[0] };
+    } catch (e) { return { success: false, message: sbPesan(e) }; }
+}
+
+// Ubah Status Belanja (Urgent / Normal) satu material. Urgent = satu baris; Normal = baris dihapus. Hanya Administrator & Kepala Produksi (dijaga juga di database).
+async function sbSetPrioritas(pId, nama, urgent) {
+    try {
+        const id = pId + '|' + nama, el = document.getElementById('user-name');
+        const q = urgent ? sbKlien().from('Prioritas_Belanja').upsert({ ID_Prioritas: id, Project_ID: pId, Nama_Item: nama, Prioritas: 'Urgent', Tanggal: new Date().toISOString(), Oleh: el ? el.innerText : '' }, { onConflict: 'ID_Prioritas' }).select()
+                        : sbKlien().from('Prioritas_Belanja').delete().eq('ID_Prioritas', id).select();
+        const { data, error } = await q;
+        if (error) return { success: false, message: sbPesan(error) };
+        if (urgent && (!data || data.length === 0)) return { success: false, message: 'Tidak tersimpan. Hanya Administrator dan Kepala Produksi yang boleh mengubah Status Belanja.' };
+        if (!urgent && (!data || data.length === 0)) { const cek = await sbKlien().from('Prioritas_Belanja').select('ID_Prioritas').eq('ID_Prioritas', id); if (cek.data && cek.data.length) return { success: false, message: 'Tidak tersimpan. Hanya Administrator dan Kepala Produksi yang boleh mengubah Status Belanja.' }; }
         return { success: true, data: data && data[0] };
     } catch (e) { return { success: false, message: sbPesan(e) }; }
 }
