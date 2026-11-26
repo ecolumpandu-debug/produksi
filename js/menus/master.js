@@ -10,9 +10,12 @@ let currentPageMaster = 1;
 const ROWS_MASTER = 10;
 
 const masterConfig = {
-    'Master_Material': { sheetName: 'Master_Material', title: 'Material', headers: ['Material ID', 'Nama Material', 'Satuan Standar', 'Harga Estimasi', 'Supplier'], keys: ['Material_ID', 'Nama_Item', 'Satuan_Standar', 'Harga_Estimasi', 'Supplier'] },
-    'Master_Jasa': { sheetName: 'Master_Jasa', title: 'Jasa (Tukang)', headers: ['Jasa ID', 'Kategori', 'Nama Jasa', 'Satuan', 'Tarif Dasar', 'Tarif Dengan Alat'], keys: ['Jasa_ID', 'Kategori', 'Nama_Jasa', 'Satuan_Standar', 'Tarif_Tanpa_Alat', 'Tarif_Dengan_Alat'] },
-    'Master_Operasional': { sheetName: 'Master_Operational', title: 'Operasional', headers: ['Ops ID', 'Kategori', 'Nama Operasional', 'Satuan', 'Estimasi Biaya', 'Keterangan / Area'], keys: ['Ops_ID', 'Kategori', 'Nama_Operasional', 'Satuan', 'Biaya_Estimasi', 'Keterangan_Area'] },
+    'Master_Material': { sheetName: 'Master_Material', title: 'Material', headers: ['Material ID', 'Nama Material', 'Satuan Standar', 'Harga Estimasi', 'Supplier'], keys: ['Material_ID', 'Nama_Item', 'Satuan_Standar', 'Harga_Estimasi', 'Supplier'], namaIdx: 1, statusBelanja: true,
+        rujukan: [['Data_RAP_Awal', 'Nama_Item', { Kategori: 'Material' }], ['Data_RAP_Tambahan', 'Nama_Item', null, true], ['Data_RAP_Final', 'Nama_Item', { Kategori: 'Material' }], ['Data_Kartu_Stok', 'Nama_Material']] },
+    'Master_Jasa': { sheetName: 'Master_Jasa', title: 'Jasa (Tukang)', headers: ['Jasa ID', 'Kategori', 'Nama Jasa', 'Satuan', 'Tarif Dasar', 'Tarif Dengan Alat'], keys: ['Jasa_ID', 'Kategori', 'Nama_Jasa', 'Satuan_Standar', 'Tarif_Tanpa_Alat', 'Tarif_Dengan_Alat'], namaIdx: 2,
+        rujukan: [['Data_RAP_Awal', 'Nama_Item', { Kategori: 'Jasa' }], ['Data_RAP_Final', 'Nama_Item', { Kategori: 'Jasa' }]] },
+    'Master_Operasional': { sheetName: 'Master_Operational', title: 'Operasional', headers: ['Ops ID', 'Kategori', 'Nama Operasional', 'Satuan', 'Estimasi Biaya', 'Keterangan / Area'], keys: ['Ops_ID', 'Kategori', 'Nama_Operasional', 'Satuan', 'Biaya_Estimasi', 'Keterangan_Area'], namaIdx: 2,
+        rujukan: [['Data_RAP_Awal', 'Nama_Item', { Kategori: 'Operasional' }], ['Data_RAP_Final', 'Nama_Item', { Kategori: 'Operasional' }]] },
     'Master_Supplier': { sheetName: 'Master_Supplier', title: 'Supplier', headers: ['Supplier ID', 'Nama Supplier', 'Telepon', 'Alamat Lengkap'], keys: ['Supplier_ID', 'Nama_Supplier', 'Telepon', 'Alamat'] }
 };
 
@@ -82,15 +85,88 @@ function openModalMaster(isEdit, rowIndex = null) {
     document.getElementById('modal-master').style.display = 'flex';
 }
 
+
+// =========================================================================
+// GANTI NAMA MASTER -> IKUT BERGANTI DI MENU LAIN
+// Tabel stok dan RAP menyimpan nama sebagai teks, jadi saat nama di master diubah, nama yang sama di tabel lain ikut diganti
+// (Kartu Stok, RAP Awal, Material Tambahan, RAP Final, centang Dibeli). Baris master dicari lewat kodenya (Material_ID dst).
+// Tabel opsional (belum dibuat di Supabase) dilewati. Bila ada yang gagal di tengah jalan, yang sudah diganti dikembalikan.
+// =========================================================================
+const _CEK_NAMA = n => String(n == null ? '' : n).trim().toLowerCase();
+function _saring(q, saring) { Object.keys(saring || {}).forEach(k => { q = q.eq(k, saring[k]); }); return q; }
+
+// Hitung baris yang memakai nama lama. Mengembalikan { total, rincian: [{ tabel, jumlah }] }.
+async function hitungPemakaianNama(db, cfg, lama) {
+    const rincian = [];
+    for (const [tabel, kolom, saring, opsional] of cfg.rujukan) {
+        const { data, error } = await _saring(db.from(tabel).select(kolom).eq(kolom, lama), saring);
+        if (error) { if (opsional) continue; throw new Error(`Gagal membaca ${tabel}: ${error.message}`); }
+        if (data.length) rincian.push({ tabel, jumlah: data.length });
+    }
+    if (cfg.statusBelanja) {
+        const { data, error } = await db.from('Status_Belanja').select('ID_Status').in('Nama_Item', [lama, '[Tambahan] ' + lama]);
+        if (!error && data.length) rincian.push({ tabel: 'Status_Belanja', jumlah: data.length });
+    }
+    return { total: rincian.reduce((t, r) => t + r.jumlah, 0), rincian };
+}
+
+// Ganti nama di semua tabel rujukan (urut). Gagal di tengah -> kembalikan yang sudah diganti, lalu lempar galat.
+async function gantiNamaDiRujukan(db, cfg, lama, baru) {
+    const selesai = [];
+    const jalan = async (dari, ke) => {
+        for (const [tabel, kolom, saring, opsional] of cfg.rujukan) {
+            const { error } = await _saring(db.from(tabel).update({ [kolom]: ke }).eq(kolom, dari), saring);
+            if (error) { if (opsional) continue; throw new Error(`Gagal memperbarui ${tabel}: ${error.message}`); }
+            if (dari === lama) selesai.push([tabel, kolom, saring]);
+        }
+        if (cfg.statusBelanja) {
+            const { data, error } = await db.from('Status_Belanja').select('ID_Status,Project_ID,Nama_Item').in('Nama_Item', [dari, '[Tambahan] ' + dari]);
+            if (error) return;   // tabel opsional
+            for (const r of data) {
+                const nama = r.Nama_Item === dari ? ke : '[Tambahan] ' + ke;
+                const { error: e2 } = await db.from('Status_Belanja').update({ Nama_Item: nama, ID_Status: r.Project_ID + '|' + nama }).eq('ID_Status', r.ID_Status);
+                if (e2) throw new Error('Gagal memperbarui Status_Belanja: ' + e2.message);
+            }
+        }
+    };
+    try { await jalan(lama, baru); }
+    catch (e) { try { await jalan(baru, lama); } catch (e2) {} throw e; }   // pengembalian: nama baru -> lama (hanya baris yang tadi diganti)
+}
+
 async function saveMaster() {
     let config = masterConfig[currentMasterMenu]; let rData = [];
     for(let i = 0; i < config.headers.length; i++) rData.push(document.getElementById(`m-input-${i}`).value);
     if(!rData[0] || !rData[1]) return alert(`Pastikan ${config.headers[0]} dan ${config.headers[1]} terisi!`);
     
-    closeModal('modal-master'); showLoading("Menyimpan...");
     const idx = document.getElementById('m-rowIndex').value;
+    // Edit nama master: nama yang sama di stok & RAP ikut diganti (baris master dikenali lewat kodenya)
+    let ganti = null;
+    if (idx && config.rujukan) {
+        const lama = String((rawMasterData.find(r => String(r.rowIndex) === String(idx)) || {})[config.keys[config.namaIdx]] || ''), baru = String(rData[config.namaIdx]).trim();
+        rData[config.namaIdx] = baru;
+        if (lama && baru !== lama) {
+            const kembar = rawMasterData.find(r => String(r.rowIndex) !== String(idx) && _CEK_NAMA(r[config.keys[config.namaIdx]]) === _CEK_NAMA(baru));
+            if (kembar) return alert(`Nama "${baru}" sudah dipakai ${config.title.toLowerCase()} lain (${kembar[config.keys[0]]}). Gunakan nama yang berbeda agar stok/RAP tidak tergabung.`);
+            showLoading('Memeriksa pemakaian nama...');
+            let pakai; try { pakai = await hitungPemakaianNama(sbKlien(), config, lama); } catch (e) { hideLoading(); return alert(e.message); }
+            hideLoading();
+            const uraian = pakai.rincian.map(r => `${r.tabel.replace(/^Data_/, '').replace(/_/g, ' ')}: ${r.jumlah}`).join(', ');
+            if (pakai.total && !confirm(`Nama "${lama}" dipakai di ${pakai.total} baris (${uraian}).\n\nGanti menjadi "${baru}" di semua menu tersebut?`)) return;
+            ganti = { lama, baru, total: pakai.total };
+        }
+    }
+
+    closeModal('modal-master'); showLoading("Menyimpan...");
+    if (ganti && ganti.total) { try { await gantiNamaDiRujukan(sbKlien(), config, ganti.lama, ganti.baru); } catch (e) { hideLoading(); return alert(e.message + '\nPerubahan nama dibatalkan, data lama tetap utuh.'); } }
+    if (typeof bersihkanCacheGudang === 'function') bersihkanCacheGudang();
     const res = idx ? await apiUpdateMaster(config.sheetName, idx, rData) : await apiSaveMaster(config.sheetName, rData);
-    if(res.success) renderMenuMaster(currentMasterMenu); else { hideLoading(); alert(res.message); }
+    if (res.success) {
+        if (ganti && typeof masterMaterial !== 'undefined' && currentMasterMenu === 'Master_Material') masterMaterial.forEach(m => { if (m.Nama_Item === ganti.lama) m.Nama_Item = ganti.baru; });
+        renderMenuMaster(currentMasterMenu);
+    } else {
+        if (ganti && ganti.total) { try { await gantiNamaDiRujukan(sbKlien(), config, ganti.baru, ganti.lama); } catch (e) {} }   // master gagal tersimpan: kembalikan nama di tabel lain
+        hideLoading(); alert(res.message);
+    }
 }
 
 async function hapusMaster(rowIndex) {
